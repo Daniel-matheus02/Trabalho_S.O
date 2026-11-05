@@ -1,0 +1,11 @@
+.reasonix/
+.gradle/
+build/
+out/
+*.iml
+.idea/
+*.log
+screenshots/
+.reasonix/
+dist/
+__pycache__/

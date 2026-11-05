@@ -1,0 +1,175 @@
+#!/bin/sh
+# Duelo de Fichas - inicializador autoextraível para Linux.
+#
+# Este único arquivo contém um runtime Java 21 embutido e o jogo, portanto o
+# usuário não precisa de Java, Gradle nem conexão com a internet.
+#
+# Uso:
+#   chmod +x DueloDeFichas-linux.run
+#   ./DueloDeFichas-linux.run              inicia o jogo
+#   ./DueloDeFichas-linux.run --server     inicia o servidor dedicado de LAN
+#   ./DueloDeFichas-linux.run --install-only
+#
+# A primeira execução descompacta em ${XDG_DATA_HOME:-~/.local/share}/duelo-de-fichas/app
+# e registra uma entrada na área de trabalho, então as execuções seguintes são imediatas.
+set -eu
+
+GAME_NAME="Duelo de Fichas"
+GAME_VERSION="__GAME_VERSION__"
+PAYLOAD_VERSION="__PAYLOAD_VERSION__"
+PAYLOAD_OFFSET=__PAYLOAD_OFFSET__
+APP_SLUG="duelo-de-fichas"
+
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+APP_HOME="$DATA_HOME/$APP_SLUG"
+APP_DIR="$APP_HOME/app"
+MARKER="$APP_DIR/payload.version"
+
+say() { printf '%s\n' "$*"; }
+warn() { printf '%s\n' "$*" >&2; }
+
+usage() {
+    cat <<EOF
+$GAME_NAME $GAME_VERSION
+
+Uso: $(basename "$0") [--server] [--install-only] [opções do jogo]
+
+  (sem opção)        inicia o jogo
+  --server           inicia o servidor multiplayer dedicado (console)
+  --install-only     instala os arquivos do jogo e encerra
+  -h, --help         mostra esta ajuda
+
+O jogo é instalado em:
+  $APP_DIR
+EOF
+}
+
+fail() {
+    warn "erro: $*"
+    exit 1
+}
+
+ensure_launcher_scripts() {
+    cat > "$APP_DIR/launch.sh" <<EOF
+#!/bin/sh
+# Gerado pelo instalador do $GAME_NAME.
+APP_DIR=\$(CDPATH= cd -- "\$(dirname -- "\$0")" && pwd)
+JAVA="\$APP_DIR/runtime/bin/java"
+[ -x "\$JAVA" ] || { echo "erro: runtime Java embutido não encontrado em \$JAVA" >&2; exit 1; }
+if [ "\${1:-}" = "--server" ]; then
+    shift
+    exec "\$JAVA" -jar "\$APP_DIR/game/duelo-server-$GAME_VERSION.jar" "\$@"
+fi
+exec "\$JAVA" -jar "\$APP_DIR/game/duelo-de-fichas-$GAME_VERSION.jar" "\$@"
+EOF
+    chmod +x "$APP_DIR/launch.sh"
+}
+
+ensure_runtime_executable() {
+    [ -f "$APP_DIR/runtime/bin/java" ] || return 0
+    if [ ! -x "$APP_DIR/runtime/bin/java" ]; then
+        chmod +x "$APP_DIR/runtime/bin/java" 2>/dev/null || true
+    fi
+}
+
+install_game() {
+    command -v tar >/dev/null 2>&1 || fail "o comando 'tar' é necessário para descompactar o jogo"
+
+    mkdir -p "$APP_HOME" || fail "não foi possível criar $APP_HOME"
+    staging="$(mktemp -d "$APP_HOME/.install.XXXXXX")" || fail "não foi possível criar um diretório temporário em $APP_HOME"
+    trap 'rm -rf "$staging"' EXIT INT TERM
+
+    say "Instalando $GAME_NAME $GAME_VERSION (primeira execução)..."
+    say "  destino: $APP_DIR"
+
+    tail -c +$((PAYLOAD_OFFSET + 1)) -- "$0" | tar -xzf - -C "$staging" \
+        || fail "não foi possível descompactar o payload embutido do jogo"
+
+    [ -f "$staging/game/duelo-de-fichas-$GAME_VERSION.jar" ] \
+        || fail "o payload descompactado está incompleto"
+    [ -f "$staging/runtime/bin/java" ] \
+        || fail "o runtime Java descompactado está incompleto"
+
+    printf '%s\n' "$PAYLOAD_VERSION" > "$staging/payload.version"
+
+    previous="$APP_HOME/app.previous"
+    rm -rf "$previous"
+    if [ -d "$APP_DIR" ]; then
+        mv "$APP_DIR" "$previous" || fail "não foi possível substituir a instalação anterior"
+    fi
+    mv "$staging" "$APP_DIR" || fail "não foi possível mover a instalação para o destino"
+    trap - EXIT INT TERM
+    rm -rf "$previous"
+
+    # O tar normalmente restaura estas permissões; garanta que um umask restritivo
+    # ou uma implementação de tar limitada não as tenha removido.
+    chmod +x "$APP_DIR/runtime/bin/"* 2>/dev/null || true
+    [ -f "$APP_DIR/runtime/lib/jspawnhelper" ] && chmod +x "$APP_DIR/runtime/lib/jspawnhelper" 2>/dev/null || true
+
+    ensure_launcher_scripts
+    ensure_runtime_executable
+    install_desktop_entry
+}
+
+install_desktop_entry() {
+    applications="$DATA_HOME/applications"
+    icons="$DATA_HOME/icons/hicolor/256x256/apps"
+    mkdir -p "$applications" "$icons" 2>/dev/null || return 0
+
+    if [ -f "$APP_DIR/icon.png" ]; then
+        cp "$APP_DIR/icon.png" "$icons/$APP_SLUG.png" 2>/dev/null || true
+    fi
+
+    entry="$applications/$APP_SLUG.desktop"
+    cat > "$entry" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=$GAME_NAME
+Comment=Duelo de cartas 1v1
+Exec="$APP_DIR/launch.sh"
+Icon=$APP_SLUG
+Terminal=false
+Categories=Game;CardGame;
+EOF
+    chmod +x "$entry" 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# Principal
+# ---------------------------------------------------------------------------
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+esac
+
+install_only=0
+if [ "${1:-}" = "--install-only" ]; then
+    install_only=1
+    shift
+fi
+if [ "${DUELO_INSTALL_ONLY:-0}" = "1" ]; then
+    install_only=1
+fi
+
+installed=0
+if [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "$PAYLOAD_VERSION" ]; then
+    installed=1
+fi
+
+if [ "$installed" -eq 0 ]; then
+    install_game
+else
+    ensure_launcher_scripts
+    ensure_runtime_executable
+fi
+
+if [ "$install_only" -eq 1 ]; then
+    say "Diretório de instalação: $APP_DIR"
+    exit 0
+fi
+
+say "Iniciando $GAME_NAME $GAME_VERSION..."
+exec "$APP_DIR/launch.sh" "$@"

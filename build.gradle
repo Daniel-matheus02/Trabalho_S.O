@@ -1,0 +1,116 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'com.game'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+}
+
+ext {
+    gdxVersion = '1.12.1'
+    nettyVersion = '4.1.112.Final'
+    jacksonVersion = '2.17.2'
+    junitVersion = '5.10.2'
+}
+
+dependencies {
+    // Framework do jogo / renderização
+    implementation "com.badlogicgames.gdx:gdx:$gdxVersion"
+    implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
+    runtimeOnly "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+
+    // Rede
+    implementation "io.netty:netty-codec:$nettyVersion"
+    implementation "io.netty:netty-handler:$nettyVersion"
+    implementation "io.netty:netty-transport:$nettyVersion"
+    implementation "io.netty:netty-buffer:$nettyVersion"
+    implementation "io.netty:netty-common:$nettyVersion"
+    implementation "io.netty:netty-resolver:$nettyVersion"
+
+    // Protocolo JSON
+    implementation "com.fasterxml.jackson.core:jackson-databind:$jacksonVersion"
+
+    // Testes
+    testImplementation platform("org.junit:junit-bom:$junitVersion")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+application {
+    mainClass = 'com.game.launcher.DesktopLauncher'
+}
+
+// O projeto gera seus próprios jars autônomos (clientJar/serverJar), então as
+// distribuições genéricas do plugin application não são usadas. Desativá-las também evita
+// que o Gradle acuse os fat jars em build/libs como entradas não declaradas de
+// startScripts/distTar.
+tasks.named('startScripts') { enabled = false }
+tasks.named('distZip') { enabled = false }
+tasks.named('distTar') { enabled = false }
+tasks.named('installDist') { enabled = false }
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        exceptionFormat 'full'
+    }
+}
+
+tasks.named('run') {
+    // Permite passar, por exemplo, `gradle run --args="--screenshot=out.png"`
+    standardInput = System.in
+}
+
+// Servidor multiplayer autônomo (sem cliente gráfico)
+tasks.register('runServer', JavaExec) {
+    group = 'application'
+    description = 'Executa o servidor multiplayer autoritativo sem o cliente gráfico.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.game.launcher.ServerLauncher'
+    standardInput = System.in
+}
+
+def fatJarTask = { String taskName, String baseName, String mainClass, String descriptionText ->
+    tasks.register(taskName, Jar) {
+        group = 'distribution'
+        description = descriptionText
+        archiveBaseName = baseName
+        archiveVersion = project.version
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        manifest {
+            attributes 'Main-Class': mainClass
+        }
+        from sourceSets.main.output
+        dependsOn configurations.runtimeClasspath
+        from {
+            configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+        }
+        exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'module-info.class'
+    }
+}
+
+fatJarTask('clientJar', 'duelo-de-fichas', 'com.game.launcher.DesktopLauncher',
+        'Gera um jar de cliente autônomo e executável.')
+
+fatJarTask('serverJar', 'duelo-server', 'com.game.launcher.ServerLauncher',
+        'Gera um jar de servidor autônomo e executável.')
+
+tasks.register('dist') {
+    group = 'distribution'
+    description = 'Gera os jars autônomos do cliente e do servidor.'
+    dependsOn 'clientJar', 'serverJar'
+}
