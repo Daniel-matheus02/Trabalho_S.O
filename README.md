@@ -1,10 +1,7 @@
 # Duelo de Fichas
 
 Um duelo de cartas 1v1 inspirado no Balatro, feito como jogo desktop nativo em Java 21
-com libGDX, LWJGL3, Netty e Jackson. As regras são uma portagem fiel do protótipo
-`Duelo de Fichas.html` fornecido, ampliado com uma mesa polida, IA para um jogador,
-multiplayer em LAN e um servidor autoritativo autônomo. O modo de um jogador não precisa
-de navegador, servidor nem conexão com a internet.
+com libGDX, LWJGL3, Netty e Jackson. 
 
 ---
 
