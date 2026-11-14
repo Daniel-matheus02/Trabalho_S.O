@@ -77,6 +77,25 @@ class BotBrainTest {
     }
 
     @Test
+    void choosesTwoCardsUsingTheCommunityTable() {
+        BotBrain twoCardBrain = new BotBrain(scoring, 2);
+        List<Card> hand = hand("AE", "AC", "KO", "7E", "2C", "9P", "3E", "4O");
+        List<Card> community = hand("AO", "KC", "5C", "6P", "8O");
+        List<Card> play = twoCardBrain.choosePlay(hand, List.of(), null, community);
+        assertEquals(2, play.size());
+        assertTrue(hand.containsAll(play));
+        assertEquals(5, play.size() + community.size() - 2);
+    }
+
+    @Test
+    void choosesASabotageOrPassesWhenEmpty() {
+        assertEquals(0, brain.chooseSabotage(List.of("peso_chumbo")));
+        assertEquals(-1, brain.chooseSabotage(List.of()));
+        int index = brain.chooseSabotage(List.of("virada_naipes", "nevoa"));
+        assertEquals("nevoa", List.of("virada_naipes", "nevoa").get(index));
+    }
+
+    @Test
     void emptyHandIsHandled() {
         assertTrue(brain.choosePlay(List.of(), List.of(), null).isEmpty());
     }

@@ -84,24 +84,31 @@ class ServerIntegrationTest {
         ClientEvent.ErrorReceived error = awaitError(beto, "NOT_YOUR_TURN", 5_000);
         assertEquals("NOT_YOUR_TURN", error.code());
 
-        // O jogador 1 envia três cartas.
-        List<String> play1 = anaState.player(1).hand().subList(0, 3).stream()
+        // O jogador 1 envia duas cartas.
+        List<String> play1 = anaState.player(1).hand().subList(0, 2).stream()
                 .map(Card::code).toList();
         ana.sendAction(ActionPayload.play(play1));
         await(ana, s -> s.currentPlayer() == 2 && s.phase() == GamePhase.BUILD, 5_000);
         await(beto, s -> s.currentPlayer() == 2 && s.phase() == GamePhase.BUILD, 5_000);
 
-        // O jogador 2 envia duas cartas.
+        // O jogador 2 envia duas cartas; as cinco cartas da mesa são abertas.
         GameSnapshot betoTurn = beto.latestSnapshot();
         List<String> play2 = betoTurn.player(2).hand().subList(0, 2).stream()
                 .map(Card::code).toList();
         beto.sendAction(ActionPayload.play(play2));
 
+        GameSnapshot anaSabotage = await(ana, s -> s.phase() == GamePhase.SABOTAGE, 5_000);
+        assertEquals(5, anaSabotage.community().size());
+        assertEquals(1, anaSabotage.firstResolver());
+        ana.sendAction(ActionPayload.passSabotage());
+        beto.sendAction(ActionPayload.passSabotage());
+
         GameSnapshot anaReveal = await(ana, s -> s.phase() == GamePhase.REVEAL, 5_000);
         GameSnapshot betoReveal = await(beto, s -> s.phase() == GamePhase.REVEAL, 5_000);
         assertNotNull(anaReveal.lastOutcome());
-        assertEquals(3, anaReveal.lastOutcome().player1Cards().size());
+        assertEquals(2, anaReveal.lastOutcome().player1Cards().size());
         assertEquals(2, anaReveal.lastOutcome().player2Cards().size());
+        assertEquals(5, anaReveal.lastOutcome().community().size());
         assertEquals(anaReveal.lastOutcome().player1Score(), betoReveal.lastOutcome().player1Score());
 
         int expectedWinner = anaReveal.lastOutcome().winner();
@@ -113,18 +120,20 @@ class ServerIntegrationTest {
             assertEquals(300 - damage, anaReveal.player(1).hp());
         }
 
-        // Ambos confirmam a revelação e depois vão para o draft.
+        // Ambos confirmam a revelação e depois vão para a loja.
         ana.sendAction(ActionPayload.advance());
         beto.sendAction(ActionPayload.advance());
 
-        GameSnapshot anaDraft = await(ana, s -> s.phase() == GamePhase.DRAFT, 5_000);
-        GameSnapshot betoDraft = await(beto, s -> s.phase() == GamePhase.DRAFT, 5_000);
-        assertEquals(3, anaDraft.player(1).offers().size());
-        assertEquals(anaDraft.player(1).offers(), betoDraft.player(2).offers());
+        GameSnapshot anaShop = await(ana, s -> s.phase() == GamePhase.SHOP, 5_000);
+        GameSnapshot betoShop = await(beto, s -> s.phase() == GamePhase.SHOP, 5_000);
+        assertEquals(3, anaShop.player(1).offers().size());
+        assertEquals(3, anaShop.player(1).sabotageOffers().size());
+        assertEquals(anaShop.player(1).offers(), betoShop.player(2).offers());
 
         ana.sendAction(ActionPayload.pickJoker(0));
-        await(beto, s -> s.phase() == GamePhase.DRAFT && s.currentPlayer() == 2, 5_000);
+        ana.sendAction(ActionPayload.ready());
         beto.sendAction(ActionPayload.pickJoker(1));
+        beto.sendAction(ActionPayload.ready());
 
         GameSnapshot roundTwo = await(ana, s -> s.phase() == GamePhase.BUILD && s.round() == 2, 5_000);
         assertEquals(2, roundTwo.round());
@@ -132,6 +141,7 @@ class ServerIntegrationTest {
         assertEquals(1, roundTwo.player(1).jokers().size());
         assertEquals(1, roundTwo.player(2).jokers().size());
         assertEquals(8, roundTwo.player(1).hand().size());
+        assertEquals(2, roundTwo.firstResolver());
 
         assertTrue(server.sessions().activeSessions() >= 1);
     }

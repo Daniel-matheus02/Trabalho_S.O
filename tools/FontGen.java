@@ -100,6 +100,19 @@ public final class FontGen {
         add('\u2605', ".....", "..#..", ".###.", "#####", ".###.", "#...#", "....."); // estrela
         add('\u25cf', "..###..", ".#####.", "#######", "#######", "#######", ".#####.", "..###.."); // círculo preenchido
         add('\u25cb', "..###..", ".#...#.", "#.....#", "#.....#", "#.....#", ".#...#.", "..###.."); // círculo vazado
+
+        // Cobertura Latin-1/Smart quotes que faltava no atlas antigo.
+        add('@', ".###.", "#...#", "#.###", "#.#.#", "#.###", "#....", ".###.");
+        add('^', "..#..", ".#.#.", "#...#", ".....", ".....", ".....", ".....");
+        add('`', ".#...", "..#..", ".....", ".....", ".....", ".....", ".....");
+        add('~', ".....", ".....", ".#..#", "#.##.", ".....", ".....", ".....");
+        add('\u00b0', ".##..", "#..#.", ".##..", ".....", ".....", ".....", "....."); // grau
+        add('\u00aa', ".###.", "#.#.#", ".###.", ".....", ".....", ".....", "....."); // ordinal feminino
+        add('\u00ba', ".###.", "#...#", ".###.", ".....", ".....", ".....", "....."); // ordinal masculino
+        add('\u2018', "..#..", "..#..", ".....", ".....", ".....", ".....", "....."); // aspas simples esquerda
+        add('\u2019', "..#..", "..#..", ".....", ".....", ".....", ".....", "....."); // aspas simples direita
+        add('\u201c', ".#.#.", ".#.#.", ".....", ".....", ".....", ".....", "....."); // aspas duplas esquerda
+        add('\u201d', ".#.#.", ".#.#.", ".....", ".....", ".....", ".....", "....."); // aspas duplas direita
     }
 
     /** Máscaras de acento desenhadas nas duas linhas acima do corpo da letra. */
@@ -167,15 +180,18 @@ public final class FontGen {
         glyphs.put('\u00e7', withAccent(GLYPHS.get('C'), null, true));
         glyphs.put('\u00c7', withAccent(GLYPHS.get('C'), null, true));
 
-        // Normaliza cada glifo para uma célula 5x10: duas linhas de acento, sete linhas da letra e uma
-        // linha de descendente. A linha de base fica na linha 9, então todos os glifos se alinham.
+        // Normaliza cada glifo para uma célula 5x10. As duas primeiras linhas ficam SEMPRE vazias
+        // e reservadas para o acento; o corpo da letra começa na linha 2 (linha de base na 9).
+        // Isso mantém letras com e sem acento na MESMA linha de base — antes o corpo acentuado
+        // era deslocado 2 px para baixo dentro da célula.
         Map<Character, String[]> cells = new LinkedHashMap<>();
         for (Map.Entry<Character, String[]> e : glyphs.entrySet()) {
             String[] mask = e.getValue();
             String[] cell = new String[10];
             java.util.Arrays.fill(cell, ".....");
-            for (int i = 0; i < mask.length; i++) {
-                cell[i] = mask[i];
+            int offset = mask.length >= 10 ? 0 : 2;
+            for (int i = 0; i < mask.length && i + offset < cell.length; i++) {
+                cell[i + offset] = mask[i];
             }
             cells.put(e.getKey(), cell);
         }
@@ -215,8 +231,8 @@ public final class FontGen {
         Files.createDirectories(outDir);
         ImageIO.write(image, "png", outDir.resolve("pixel.png").toFile());
 
-        String fnt = "info face=\"DueloPixel\" size=8 bold=0 italic=0 charset=\"\" unicode=1 stretchH=100 smooth=0 aa=1 padding=0,0,0,0 spacing=1,1\n"
-                + "common lineHeight=11 base=9 scaleW=" + width + " scaleH=" + height + " pages=1 packed=0\n"
+        String fnt = "info face=\"DueloPixel\" size=12 bold=0 italic=0 charset=\"\" unicode=1 stretchH=100 smooth=0 aa=1 padding=0,0,0,0 spacing=1,1\n"
+                + "common lineHeight=12 base=9 scaleW=" + width + " scaleH=" + height + " pages=1 packed=0\n"
                 + "page id=0 file=\"pixel.png\"\n"
                 + "chars count=" + count + "\n"
                 + chars;

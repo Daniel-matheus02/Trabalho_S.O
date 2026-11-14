@@ -246,6 +246,13 @@ public final class GameSession {
                 }
                 engine.submitPlay(playerId, cards);
             }
+            case USE_SABOTAGE -> {
+                if (action.offerIndex() == null) {
+                    throw new GameRuleException("INVALID_SABOTAGE", "Índice de sabotagem ausente");
+                }
+                engine.useSabotage(playerId, action.offerIndex());
+            }
+            case PASS_SABOTAGE -> engine.passSabotage(playerId);
             case PICK_JOKER -> {
                 if (action.offerIndex() == null) {
                     throw new GameRuleException("INVALID_OFFER", "Índice de oferta ausente");
@@ -253,6 +260,13 @@ public final class GameSession {
                 engine.pickJoker(playerId, action.offerIndex());
             }
             case REROLL -> engine.reroll(playerId);
+            case BUY_SABOTAGE -> {
+                if (action.offerIndex() == null) {
+                    throw new GameRuleException("INVALID_SABOTAGE", "Índice de sabotagem ausente");
+                }
+                engine.buySabotage(playerId, action.offerIndex());
+            }
+            case READY -> engine.ready(playerId);
             case ADVANCE -> engine.advance(playerId);
             case REMATCH -> engine.requestRematch(playerId);
         }

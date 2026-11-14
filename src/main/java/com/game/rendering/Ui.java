@@ -25,7 +25,8 @@ public final class Ui {
     }
 
     public static Label label(Skin skin, String text, String style) {
-        return new Label(text == null ? "" : text, skin, style);
+        // Ponto único de normalização: qualquer texto exibido chega à fonte em NFC.
+        return new Label(Typography.normalize(text), skin, style);
     }
 
     public static Label wrapLabel(Skin skin, String text, String style) {
@@ -36,11 +37,16 @@ public final class Ui {
     }
 
     public static TextButton button(Skin skin, String text, String style, Runnable action) {
-        TextButton button = new TextButton(text, skin, style);
+        TextButton button = new TextButton(Typography.normalize(text), skin, style);
         if (action != null) {
             button.addListener(new com.badlogic.gdx.scenes.scene2d.utils.ClickListener() {
                 @Override
                 public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y) {
+                    // setDisabled() só altera o visual do TextButton; sem esta guarda o clique
+                    // continuaria disparando a ação e o motor lançaria uma GameRuleException.
+                    if (button.isDisabled()) {
+                        return;
+                    }
                     action.run();
                 }
             });

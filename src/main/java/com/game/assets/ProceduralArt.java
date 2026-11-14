@@ -50,31 +50,104 @@ public final class ProceduralArt {
         pixmap.fillCircle(x + width - r - 1, y + height - r - 1, r);
     }
 
-    /** Carta de baralho em tom creme, com borda em bisel e uma linha interna gravada sutil. */
+    /**
+     * Carta de baralho em tom creme: borda em bisel, gradiente de papel sutil, moldura interna
+     * desenhada como um contorno real (sem os círculos que apareciam nos cantos) e fibra de papel.
+     */
     public static Pixmap cardFace(int width, int height) {
-        Pixmap pixmap = roundedRect(width, height, 12, Palette.CARD, Palette.CARD_EDGE, 3);
+        int radius = Math.max(6, Math.round(width * 0.15f));
+        int border = Math.max(2, Math.round(width / 32f));
+        Pixmap pixmap = roundedRect(width, height, radius, Palette.CARD, Palette.CARD_EDGE, border);
         pixmap.setBlending(Pixmap.Blending.SourceOver);
-        // linha interna
-        strokeRoundRect(pixmap, 7, 7, width - 14, height - 14, 8, Palette.rgba(0xc9bd9f, 0.3f));
-        // brilho superior
-        pixmap.setColor(Palette.rgba(0xffffff, 0.28f));
-        pixmap.fillRectangle(10, 4, width - 20, 2);
+
+        // Papel: topo iluminado, base levemente amarelada.
+        float invH = 1f / Math.max(1, height - 1);
+        for (int y = 0; y < height; y++) {
+            float t = y * invH;
+            float light = (1f - t) * 0.085f;
+            float shade = t * 0.05f;
+            for (int x = 0; x < width; x++) {
+                int rgba = pixmap.getPixel(x, y);
+                if ((rgba & 0xff) == 0) {
+                    continue;
+                }
+                pixmap.drawPixel(x, y, mixPixel(rgba, 0xffffff, light, 0xc0b598, shade));
+            }
+        }
+
+        // Fibra de papel: pontos quase invisíveis que tiram o aspecto chapado.
+        Random random = new Random(0x5EEDF1B ^ (width * 31L + height));
+        pixmap.setColor(Palette.rgba(0x8d8163, 0.10f));
+        int grain = Math.max(12, width * height / 24);
+        for (int i = 0; i < grain; i++) {
+            int x = random.nextInt(width);
+            int y = random.nextInt(height);
+            if ((pixmap.getPixel(x, y) & 0xff) != 0) {
+                pixmap.drawPixel(x, y);
+            }
+        }
+
+        // Moldura interna gravada, com espessura constante e cantos limpos.
+        strokeRoundRect(pixmap, border + 2, border + 2, width - (border + 2) * 2,
+                height - (border + 2) * 2, Math.max(3, radius - border - 1), 1,
+                Palette.rgba(0xc9bd9f, 0.55f));
+        // Realce de bisel: linha clara no topo e sombra suave na base.
+        pixmap.setColor(Palette.rgba(0xffffff, 0.35f));
+        pixmap.fillRectangle(radius + 2, border + 1, width - (radius + 2) * 2, 1);
+        pixmap.setColor(Palette.rgba(0x8d8163, 0.16f));
+        pixmap.fillRectangle(radius + 2, height - border - 2, width - (radius + 2) * 2, 1);
         return pixmap;
     }
 
-    /** Verso escuro da carta com padrão de losangos trançados e borda dourada. */
+    /**
+     * Verso da carta: fundo esmeralda profundo, moldura e treliça dourada e um losango central
+     * vazado para receber o emblema. Todo o contorno é traçado sem "bolinhas" nos cantos.
+     */
     public static Pixmap cardBack(int width, int height) {
-        Pixmap pixmap = roundedRect(width, height, 12, Palette.rgb(0x14382a), Palette.GOLD, 2);
+        int radius = Math.max(6, Math.round(width * 0.15f));
+        int border = Math.max(2, Math.round(width / 36f));
+        Pixmap pixmap = roundedRect(width, height, radius, Palette.rgb(0x0e2f24), Palette.GOLD, border);
         pixmap.setBlending(Pixmap.Blending.SourceOver);
-        for (int y = 8; y < height - 8; y++) {
-            for (int x = 8; x < width - 8; x++) {
-                if (((x + y) / 4) % 2 == 0 && ((x - y + width) / 4) % 2 == 0) {
-                    pixmap.setColor(Palette.rgba(0x1f5240, 0.65f));
+
+        int inset = Math.max(4, Math.round(width * 0.07f));
+        int innerW = width - inset * 2;
+        int innerH = height - inset * 2;
+        strokeRoundRect(pixmap, inset, inset, innerW, innerH, Math.max(2, radius - inset), 1,
+                Palette.rgba(0xe6b64c, 0.7f));
+
+        // Treliça diagonal de fios dourados.
+        int stride = Math.max(5, Math.round(width * 0.09f));
+        pixmap.setColor(Palette.rgba(0xe6b64c, 0.14f));
+        for (int y = inset + 3; y < height - inset - 3; y++) {
+            for (int x = inset + 3; x < width - inset - 3; x++) {
+                if ((x + y) % stride == 0 || (x - y + width * 8) % stride == 0) {
                     pixmap.drawPixel(x, y);
                 }
             }
         }
-        strokeRoundRect(pixmap, 4, 4, width - 8, height - 8, 9, Palette.rgba(0xe6b64c, 0.45f));
+
+        // Losango central vazado para o emblema.
+        int cx = width / 2;
+        int cy = height / 2;
+        int diamond = Math.max(8, Math.round(Math.min(width, height) * 0.30f));
+        for (int y = cy - diamond; y <= cy + diamond; y++) {
+            for (int x = cx - diamond; x <= cx + diamond; x++) {
+                int distance = Math.abs(x - cx) + Math.abs(y - cy);
+                if (distance <= diamond - 2) {
+                    pixmap.setColor(Palette.rgba(0x0a2419, 0.85f));
+                    pixmap.drawPixel(x, y);
+                } else if (distance <= diamond) {
+                    pixmap.setColor(Palette.rgba(0xe6b64c, 0.55f));
+                    pixmap.drawPixel(x, y);
+                }
+            }
+        }
+
+        // Realce de bisel e vinheta interna.
+        pixmap.setColor(Palette.rgba(0xffffff, 0.14f));
+        pixmap.fillRectangle(radius + 2, border, width - (radius + 2) * 2, 1);
+        strokeRoundRect(pixmap, 2, 2, width - 4, height - 4, Math.max(2, radius - 1), 1,
+                Palette.rgba(0x000000, 0.25f));
         return pixmap;
     }
 
@@ -232,17 +305,56 @@ public final class ProceduralArt {
         return pixmap;
     }
 
+    /**
+     * Traça o contorno de um retângulo arredondado com espessura constante usando a distância
+     * assinada até a borda. Evita os arcos desenhados com {@code drawCircle}, que deixavam
+     * círculos soltos nos cantos do cartão.
+     */
     private static void strokeRoundRect(Pixmap pixmap, int x, int y, int width, int height,
-                                        int radius, Color color) {
+                                        int radius, int thickness, Color color) {
+        if (width <= 0 || height <= 0) {
+            return;
+        }
         pixmap.setColor(color);
-        pixmap.drawCircle(x + radius, y + radius, radius);
-        pixmap.drawCircle(x + width - radius - 1, y + radius, radius);
-        pixmap.drawCircle(x + radius, y + height - radius - 1, radius);
-        pixmap.drawCircle(x + width - radius - 1, y + height - radius - 1, radius);
-        pixmap.drawLine(x + radius, y, x + width - radius, y);
-        pixmap.drawLine(x + radius, y + height - 1, x + width - radius, y + height - 1);
-        pixmap.drawLine(x, y + radius, x, y + height - radius);
-        pixmap.drawLine(x + width - 1, y + radius, x + width - 1, y + height - radius);
+        int r = Math.max(0, Math.min(radius, Math.min(width, height) / 2));
+        float halfW = width / 2f;
+        float halfH = height / 2f;
+        float centerX = x + halfW - 0.5f;
+        float centerY = y + halfH - 0.5f;
+        float straightW = Math.max(0f, halfW - r);
+        float straightH = Math.max(0f, halfH - r);
+        float limit = thickness + 0.5f;
+        for (int py = y; py < y + height; py++) {
+            for (int px = x; px < x + width; px++) {
+                float qx = Math.abs(px - centerX) - straightW;
+                float qy = Math.abs(py - centerY) - straightH;
+                float outside = (float) Math.sqrt(Math.max(qx, 0f) * Math.max(qx, 0f)
+                        + Math.max(qy, 0f) * Math.max(qy, 0f));
+                float signed = outside + Math.min(Math.max(qx, qy), 0f) - r;
+                if (Math.abs(signed) <= limit) {
+                    pixmap.drawPixel(px, py);
+                }
+            }
+        }
+    }
+
+    /** Mistura um pixel RGBA opaco com branco (clarear) e com um tom de papel (sombrear). */
+    private static int mixPixel(int rgba, int lightHex, float lightAmount,
+                                int shadeHex, float shadeAmount) {
+        int r = (rgba >>> 24) & 0xff;
+        int g = (rgba >>> 16) & 0xff;
+        int b = (rgba >>> 8) & 0xff;
+        int a = rgba & 0xff;
+        int lr = (lightHex >>> 16) & 0xff;
+        int lg = (lightHex >>> 8) & 0xff;
+        int lb = lightHex & 0xff;
+        int sr = (shadeHex >>> 16) & 0xff;
+        int sg = (shadeHex >>> 8) & 0xff;
+        int sb = shadeHex & 0xff;
+        r = clamp(Math.round(r + (lr - r) * lightAmount + (sr - r) * shadeAmount));
+        g = clamp(Math.round(g + (lg - g) * lightAmount + (sg - g) * shadeAmount));
+        b = clamp(Math.round(b + (lb - b) * lightAmount + (sb - b) * shadeAmount));
+        return (r << 24) | (g << 16) | (b << 8) | a;
     }
 
     private static int clamp(int value) {

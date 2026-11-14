@@ -1,6 +1,8 @@
 package com.game.rendering;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.NinePatch;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -18,6 +20,8 @@ public final class PlayerPanel extends Table {
 
     private final Label nameLabel;
     private final Label hpLabel;
+    private final Label coinsLabel;
+    private final Label statusLabel;
     private final Label turnLabel;
     private final Table turnPill;
     private final HealthBar healthBar;
@@ -25,6 +29,7 @@ public final class PlayerPanel extends Table {
     private final Table backRow;
 
     private int shownBacks = -1;
+    private int shownHp = -1;
 
     public PlayerPanel(GameAssets assets, int playerId, boolean showOpponentHand) {
         this(assets, playerId, showOpponentHand, false);
@@ -42,16 +47,18 @@ public final class PlayerPanel extends Table {
         nameLabel = Ui.label(skin, "", compact
                 ? (playerId == 1 ? "p1" : "p2") : (playerId == 1 ? "h2-p1" : "h2-p2"));
         turnPill = new Table();
-        turnPill.setBackground(new NinePatchDrawable(new NinePatch(assets.patch("pillWhite")))
-                .tint(Palette.rgba(0xe6b64c, 0.22f)));
+        turnPill.setBackground(new NinePatchDrawable(new NinePatch(assets.patch("panelDeep"))));
         turnLabel = Ui.label(skin, "", "gold-small");
         turnPill.add(turnLabel).pad(compact ? 2 : 4, compact ? 8 : 10,
                 compact ? 2 : 4, compact ? 8 : 10);
         turnPill.setVisible(false);
         hpLabel = Ui.label(skin, "", compact ? "body" : "hp-number");
+        coinsLabel = Ui.label(skin, "", "gold-small");
+        statusLabel = Ui.label(skin, "", "small");
 
         Table head = new Table();
         head.add(nameLabel).left().expandX();
+        head.add(coinsLabel).right().padRight(compact ? 8 : 12);
         head.add(turnPill).padRight(compact ? 8 : 14);
         head.add(hpLabel).right();
         add(head).growX().row();
@@ -62,6 +69,7 @@ public final class PlayerPanel extends Table {
 
         Table bottom = new Table();
         jokerRow = new JokerRow(assets);
+        bottom.add(statusLabel).left().padRight(8);
         bottom.add(jokerRow).left().expandX();
         backRow = new Table();
         if (showOpponentHand) {
@@ -73,8 +81,20 @@ public final class PlayerPanel extends Table {
     public void update(PlayerView view, boolean isTurn, String turnText) {
         nameLabel.setText(view.name().toUpperCase());
         hpLabel.setText(view.hp() + " / " + view.maxHp());
+        if (shownHp >= 0 && view.hp() < shownHp) {
+            hpLabel.clearActions();
+            hpLabel.setColor(Palette.BAD);
+            hpLabel.addAction(Actions.color(Color.WHITE, 0.55f));
+        }
+        shownHp = view.hp();
         healthBar.setValues(view.hp(), view.maxHp(), true);
         jokerRow.update(view.jokers());
+        coinsLabel.setText(view.coins() + " MOEDAS");
+        StringBuilder status = new StringBuilder("SAB ").append(view.sabotageCount());
+        if (view.lossStreak() >= 2) {
+            status.append("  -  AZAR ").append(view.lossStreak());
+        }
+        statusLabel.setText(status.toString());
 
         turnLabel.setText(turnText);
         turnPill.setVisible(isTurn);
@@ -86,6 +106,11 @@ public final class PlayerPanel extends Table {
 
     public void flashDamage() {
         healthBar.flash();
+    }
+
+    /** Desliga tremor, rastro e partículas (usado pela preferência de movimento reduzido). */
+    public void setEffectsEnabled(boolean enabled) {
+        healthBar.setEffectsEnabled(enabled);
     }
 
     private void updateBacks(int count) {

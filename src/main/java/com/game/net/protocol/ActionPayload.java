@@ -13,12 +13,28 @@ public record ActionPayload(ActionType action, List<String> cards, Integer offer
         return new ActionPayload(ActionType.SUBMIT_PLAY, cardCodes, null);
     }
 
+    public static ActionPayload useSabotage(int handIndex) {
+        return new ActionPayload(ActionType.USE_SABOTAGE, List.of(), handIndex);
+    }
+
+    public static ActionPayload passSabotage() {
+        return new ActionPayload(ActionType.PASS_SABOTAGE, List.of(), -1);
+    }
+
     public static ActionPayload pickJoker(int index) {
         return new ActionPayload(ActionType.PICK_JOKER, List.of(), index);
     }
 
     public static ActionPayload reroll() {
         return new ActionPayload(ActionType.REROLL, List.of(), null);
+    }
+
+    public static ActionPayload buySabotage(int offerIndex) {
+        return new ActionPayload(ActionType.BUY_SABOTAGE, List.of(), offerIndex);
+    }
+
+    public static ActionPayload ready() {
+        return new ActionPayload(ActionType.READY, List.of(), null);
     }
 
     public static ActionPayload advance() {

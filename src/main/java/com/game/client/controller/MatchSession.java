@@ -20,9 +20,19 @@ public interface MatchSession extends AutoCloseable {
 
     void submitPlay(List<Card> cards);
 
+    /** Usa a sabotagem de índice {@code handIndex}; -1 passa. */
+    void useSabotage(int handIndex);
+
+    void passSabotage();
+
     void pickJoker(int offerIndex);
 
     void reroll();
+
+    void buySabotage(int offerIndex);
+
+    /** Confirma o fim da loja e inicia a próxima rodada quando ambos estiverem prontos. */
+    void ready();
 
     void advance();
 

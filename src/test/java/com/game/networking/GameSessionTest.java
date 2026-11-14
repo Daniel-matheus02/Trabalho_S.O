@@ -103,8 +103,9 @@ class GameSessionTest {
         drain(ch2);
         assertEquals(1, state.currentPlayer());
 
-        Card card = state.player(1).hand().get(0);
-        ActionPayload action = ActionPayload.play(List.of(card.code()));
+        List<String> codes = state.player(1).hand().subList(0, 2).stream()
+                .map(Card::code).toList();
+        ActionPayload action = ActionPayload.play(codes);
         Envelope envelope = codec.message(MessageType.PLAYER_ACTION, session.sessionId(), 1, action);
 
         session.handleAction(1, envelope, action);

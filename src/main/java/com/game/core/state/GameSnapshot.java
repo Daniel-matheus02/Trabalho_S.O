@@ -1,5 +1,6 @@
 package com.game.core.state;
 
+import com.game.core.model.Card;
 import com.game.core.rules.GameRules;
 import com.game.core.rules.RoundOutcome;
 
@@ -19,6 +20,8 @@ public record GameSnapshot(
         String globalModifierId,
         String globalModifierName,
         String globalModifierDescription,
+        List<Card> community,
+        int firstResolver,
         PlayerView player1,
         PlayerView player2,
         RoundOutcome lastOutcome,
@@ -26,6 +29,7 @@ public record GameSnapshot(
         List<LogEntry> log
 ) {
     public GameSnapshot {
+        community = List.copyOf(community);
         log = List.copyOf(log);
     }
 
@@ -37,7 +41,8 @@ public record GameSnapshot(
         return id == 1 ? player2 : player1;
     }
 
+    /** O turno alternado existe apenas na escolha de cartas do BUILD. */
     public boolean isTurnOf(int id) {
-        return (phase == GamePhase.BUILD || phase == GamePhase.DRAFT) && currentPlayer == id;
+        return phase == GamePhase.BUILD && currentPlayer == id;
     }
 }

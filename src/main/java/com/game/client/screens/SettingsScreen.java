@@ -11,17 +11,19 @@ import com.game.rendering.Ui;
 /** Preferências de nome do jogador, animação e log do protocolo. */
 public final class SettingsScreen extends BaseScreen {
 
+    private final Table root = new Table();
+    private Table panel;
+
     public SettingsScreen(DuelGame game) {
         super(game);
         build();
     }
 
     private void build() {
-        Table root = new Table();
         root.setFillParent(true);
         root.center();
 
-        Table panel = Ui.panel(assets, "panelDark");
+        panel = Ui.panel(assets, "panelDark");
         panel.pad(34).defaults().padBottom(12);
 
         panel.add(Ui.label(skin, "CONFIGURA\u00c7\u00d5ES", "h1")).padBottom(22).row();
@@ -76,6 +78,14 @@ public final class SettingsScreen extends BaseScreen {
 
     private String logLabel() {
         return "LOG DO PROTOCOLO: " + (game.settings().showProtocolLog() ? "VIS\u00cdVEL" : "OCULTO");
+    }
+
+    /** Mantém o painel dentro da largura da janela em qualquer resolução. */
+    @Override
+    protected void onResize(float width, float height) {
+        if (panel != null && root.getCell(panel) != null) {
+            root.getCell(panel).width(Math.max(320f, Math.min(560f, width - 48f)));
+        }
     }
 
     @Override

@@ -17,6 +17,9 @@ import com.game.client.screens.MultiplayerMenuScreen;
 import com.game.client.screens.SettingsScreen;
 import com.game.core.state.GamePhase;
 import com.game.core.state.GameSnapshot;
+import com.game.qa.CardColorProbe;
+import com.game.qa.LayoutProbe;
+import com.game.qa.ScreenshotProbe;
 import com.game.server.network.GameServer;
 
 /**
@@ -43,6 +46,17 @@ public final class DuelGame extends Game {
     public void create() {
         assets = new GameAssets();
         settings = new GameSettings();
+        com.game.rendering.Typography.audit(assets);
+        if (options.probe() != null) {
+            switch (options.probe()) {
+                case "cards" -> CardColorProbe.run(assets);
+                case "layout" -> LayoutProbe.run(this);
+                case "screenshots" -> ScreenshotProbe.run(this);
+                default -> System.out.println("[Probe] desconhecido: " + options.probe());
+            }
+            Gdx.app.exit();
+            return;
+        }
         if (options.hasScreenRequest()) {
             openRequestedScreen(options.screen());
         } else {
@@ -100,28 +114,36 @@ public final class DuelGame extends Game {
     private void openDemo(String screen) {
         LocalMatchSession session = screen.equals("gameover")
                 ? new LocalMatchSession(settings.playerName(),
-                        new com.game.core.rules.GameRules(120, 8, 5, 3, 2), new java.util.Random(7))
+                        new com.game.core.rules.GameRules(120, 8, 2, 3, 2), new java.util.Random(7))
                 : new LocalMatchSession(settings.playerName());
         GameSnapshot snapshot = session.snapshot();
         switch (screen) {
             case "game" -> {
                 GameScreen gameScreen = new GameScreen(this, session, null);
                 switchTo(gameScreen);
-                gameScreen.demoSelect(3);
+                gameScreen.demoSelect(2);
                 return;
             }
             case "reveal" -> {
-                session.submitPlay(snapshot.player(1).hand().subList(0, 3));
+                session.submitPlay(snapshot.player(1).hand().subList(0, 2));
+                tickUntil(session, GamePhase.SABOTAGE, 30);
+                if (session.snapshot().phase() == GamePhase.SABOTAGE) {
+                    session.passSabotage();
+                }
                 tickUntil(session, GamePhase.REVEAL, 30);
             }
             case "draft" -> {
-                session.submitPlay(snapshot.player(1).hand().subList(0, 3));
+                session.submitPlay(snapshot.player(1).hand().subList(0, 2));
+                tickUntil(session, GamePhase.SABOTAGE, 30);
+                if (session.snapshot().phase() == GamePhase.SABOTAGE) {
+                    session.passSabotage();
+                }
                 tickUntil(session, GamePhase.REVEAL, 30);
                 session.advance();
-                tickUntil(session, GamePhase.DRAFT, 30);
+                tickUntil(session, GamePhase.SHOP, 30);
             }
             case "gameover" -> {
-                for (int i = 0; i < 500; i++) {
+                for (int i = 0; i < 800; i++) {
                     GameSnapshot state = session.snapshot();
                     if (state.phase() == GamePhase.GAME_OVER) {
                         break;
@@ -129,24 +151,29 @@ public final class DuelGame extends Game {
                     switch (state.phase()) {
                         case BUILD -> {
                             if (state.currentPlayer() == 1) {
-                                session.submitPlay(state.player(1).hand().subList(0, 5));
+                                session.submitPlay(state.player(1).hand().subList(0, 2));
                             } else {
                                 session.tick(1.2f);
                             }
+                        }
+                        case SABOTAGE -> {
+                            session.passSabotage();
+                            session.tick(1.2f);
                         }
                         case REVEAL -> {
                             session.advance();
                             session.tick(1.2f);
                         }
-                        case DRAFT -> {
-                            if (state.currentPlayer() == 1) {
+                        case SHOP -> {
+                            if (!state.player(1).jokerPicked()) {
                                 session.pickJoker(0);
+                            } else if (!state.player(1).shopReady()) {
+                                session.ready();
                             } else {
                                 session.tick(1.2f);
                             }
                         }
-                        default -> {
-                        }
+                        default -> session.tick(1.2f);
                     }
                 }
             }
@@ -170,7 +197,7 @@ public final class DuelGame extends Game {
     public void render() {
         super.render();
         frames++;
-        if (options.screenshotPath() != null && !captured && frames >= 30) {
+        if (options.screenshotPath() != null && !captured && frames >= 75) {
             captureScreenshot(options.screenshotPath());
         }
     }
@@ -215,25 +242,43 @@ public final class DuelGame extends Game {
     }
 
     /** Opções de inicialização: verificação por captura de tela e seleção da tela padrão. */
-    public record LaunchOptions(String screenshotPath, String screen) {
+    public record LaunchOptions(String screenshotPath, String screen, int width, int height,
+                                String probe) {
 
         public static LaunchOptions none() {
-            return new LaunchOptions(null, null);
+            return new LaunchOptions(null, null, 0, 0, null);
         }
 
         public static LaunchOptions parse(String[] args) {
             String screenshot = null;
             String screen = null;
+            String probe = null;
+            int width = 0;
+            int height = 0;
             if (args != null) {
                 for (String arg : args) {
                     if (arg.startsWith("--screenshot=")) {
                         screenshot = arg.substring("--screenshot=".length());
                     } else if (arg.startsWith("--screen=")) {
                         screen = arg.substring("--screen=".length());
+                    } else if (arg.startsWith("--probe=")) {
+                        probe = arg.substring("--probe=".length());
+                    } else if (arg.startsWith("--width=")) {
+                        width = parseDimension(arg.substring("--width=".length()));
+                    } else if (arg.startsWith("--height=")) {
+                        height = parseDimension(arg.substring("--height=".length()));
                     }
                 }
             }
-            return new LaunchOptions(screenshot, screen);
+            return new LaunchOptions(screenshot, screen, width, height, probe);
+        }
+
+        private static int parseDimension(String value) {
+            try {
+                return Math.max(0, Integer.parseInt(value.trim()));
+            } catch (NumberFormatException e) {
+                return 0;
+            }
         }
 
         public boolean hasScreenRequest() {

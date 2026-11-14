@@ -13,12 +13,12 @@ public final class Jokers {
     private static final Map<String, JokerDef> BY_ID = new LinkedHashMap<>();
 
     static {
-        register("naipe_afiado", "Naipe Afiado", "+15 fichas por \u2660 jogada", context -> {
+        register("naipe_afiado", "Espada Afiada", "+20 fichas por \u2660 jogada", context -> {
             int spades = context.countSuit(Suit.SPADES);
             if (spades > 0) {
                 int value = 15 * spades;
                 context.addChips(value);
-                context.addPlusLine("Naipe Afiado: +" + value + " fichas");
+                context.addPlusLine("Espada Afiada: +" + value + " fichas");
             }
         });
         register("combo5", "Combo Qu\u00edntuplo", "mult \u00d72 ao jogar 5 cartas", context -> {
@@ -45,12 +45,28 @@ public final class Jokers {
                 context.addMultLine("Par Perfeito: +4 mult");
             }
         });
-        register("coracao", "Cora\u00e7\u00e3o Valente", "+12 fichas por \u2665 jogada", context -> {
+        register("coracao", "Cortem a cabeça!", "+20 fichas por \u2665 jogada", context -> {
             int hearts = context.countSuit(Suit.HEARTS);
             if (hearts > 0) {
-                int value = 12 * hearts;
+                int value = 15 * hearts;
                 context.addChips(value);
-                context.addPlusLine("Cora\u00e7\u00e3o Valente: +" + value + " fichas");
+                context.addPlusLine("Cortem a cabeça!: +" + value + " fichas");
+            }
+        });
+        register("ouro_ardente", "Ouro Ardente", "+20 fichas por \u2666 jogada", context -> {
+            int diamonds = context.countSuit(Suit.DIAMONDS);
+            if (diamonds > 0) {
+                int value = 15 * diamonds;
+                context.addChips(value);
+                context.addPlusLine("Ouro Ardente: +" + value + " fichas");
+            }
+        });
+        register("pau_potente", "Pau Potente", "+20 fichas por \u2663 jogada", context -> {
+            int clubs = context.countSuit(Suit.CLUBS);
+            if (clubs > 0) {
+                int value = 15 * clubs;
+                context.addChips(value);
+                context.addPlusLine("Pau Potente: +" + value + " fichas");
             }
         });
         register("trinca_ouro", "Trinca de Ouro", "+60 fichas com trinca ou melhor", context -> {

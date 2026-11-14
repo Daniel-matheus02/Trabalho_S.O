@@ -3,6 +3,7 @@ package com.game.scoring;
 import com.game.core.model.Card;
 import com.game.core.model.HandType;
 import com.game.core.scoring.LineStyle;
+import com.game.core.scoring.ScoreModifiers;
 import com.game.core.scoring.ScoreResult;
 import com.game.core.scoring.ScoringEngine;
 import org.junit.jupiter.api.DisplayName;
@@ -166,6 +167,49 @@ class ScoringEngineTest {
         ScoreResult result = scoring.score(cards("KE"), List.of(), "pressao");
         assertEquals(30, result.finalScore());
         assertTrue(result.lines().stream().anyMatch(line -> line.style() == LineStyle.MULT));
+    }
+
+    @Test
+    @DisplayName("com 7 cartas, a melhor mão de 5 usa mesa e mão do jogador")
+    void bestFiveFromSevenCardPool() {
+        // Duas cartas do jogador + cinco da mesa: três ases + K + 9 formam a melhor mão.
+        ScoreResult result = scoring.score(
+                cards("AE", "AC", "AO", "KE", "2P", "7C", "9O"), List.of(), null);
+        assertEquals(HandType.THREE_OF_A_KIND, result.type());
+        assertEquals(5, result.scoringCards().size());
+        assertEquals(3, result.scoringCards().stream()
+                .filter(card -> card.rank() == com.game.core.model.Rank.ACE).count());
+        assertEquals(30 + 11 + 11 + 11 + 10 + 9, result.chips());
+    }
+
+    @Test
+    @DisplayName("a sabotagem Anti-Flush reclassifica a mão sem o flush")
+    void antiFlushCancelsFlush() {
+        List<Card> pool = cards("2E", "5E", "9E", "JE", "KE");
+        assertEquals(HandType.FLUSH, scoring.score(pool, List.of(), null).type());
+        ScoreResult blocked = scoring.score(pool, List.of(), null,
+                ScoreModifiers.NONE.withBlockFlush());
+        assertTrue(blocked.type() != HandType.FLUSH);
+        assertTrue(blocked.lines().stream().anyMatch(line -> line.text().contains("Anti-Flush")));
+    }
+
+    @Test
+    @DisplayName("Peso de Chumbo, Imposto do Par e Névoa alteram a pontuação final")
+    void sabotageScoringModifiers() {
+        List<Card> pair = cards("AE", "AC");
+
+        ScoreResult heavy = scoring.score(pair, List.of(), null,
+                ScoreModifiers.NONE.withMultPenalty(5));
+        assertEquals(0, heavy.mult());
+        assertEquals(0, heavy.finalScore());
+
+        ScoreResult taxed = scoring.score(pair, List.of(), null,
+                ScoreModifiers.NONE.withPairTax());
+        assertEquals(32 - 25, taxed.chips());
+
+        ScoreResult fog = scoring.score(pair, List.of("mao_cheia"), null,
+                ScoreModifiers.NONE.withNullifyJokers());
+        assertEquals(32, fog.chips(), "Névoa anula todos os jokers da rodada");
     }
 
     private HandType evaluate(String... codes) {

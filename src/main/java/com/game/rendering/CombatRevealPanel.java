@@ -18,6 +18,8 @@ public final class CombatRevealPanel extends Table {
 
     private final GameAssets assets;
     private final Skin skin;
+    private boolean animateDeals = true;
+    private int lastRound = -1;
 
     public CombatRevealPanel(GameAssets assets) {
         this.assets = assets;
@@ -25,33 +27,52 @@ public final class CombatRevealPanel extends Table {
         top();
     }
 
+    /** Liga ou desliga a revelação animada das cartas jogadas. */
+    public void setAnimateDeals(boolean animateDeals) {
+        this.animateDeals = animateDeals;
+    }
+
     public void update(RoundOutcome outcome, PlayerView player1, PlayerView player2) {
         clearChildren();
-        add(Ui.label(skin, "COMBATE DA RODADA " + outcome.round(), "h3")).left().padBottom(8).row();
+        boolean fresh = outcome.round() != lastRound;
+        lastRound = outcome.round();
+        boolean animate = animateDeals && fresh;
+
+        add(Ui.label(skin, "COMBATE DA RODADA " + outcome.round(), "h3")).left().padBottom(6).row();
+        add(communityRow(outcome.community())).left().padBottom(8).row();
 
         Table row = new Table();
         row.add(side(player1, outcome.player1Cards(), outcome.player1Score(),
-                outcome.winner() == 1, "p1")).growX().expandX().fillX();
+                outcome.winner() == 1, "p1", animate)).growX().expandX().fillX();
         row.add(center(outcome)).width(170).padLeft(10).padRight(10);
         row.add(side(player2, outcome.player2Cards(), outcome.player2Score(),
-                outcome.winner() == 2, "p2")).growX().expandX().fillX();
+                outcome.winner() == 2, "p2", animate)).growX().expandX().fillX();
         add(row).growX().row();
     }
 
     private Table side(PlayerView player, List<Card> cards, ScoreResult score,
-                       boolean winner, String styleName) {
+                       boolean winner, String styleName, boolean animate) {
         Table panel = Ui.panel(assets, winner ? "panelGold" : "panelGreen");
         panel.pad(10).top().left();
         panel.add(Ui.label(skin, player.name().toUpperCase()
                 + (winner ? "  \u00b7  VENCEU" : ""), widthStyle(styleName))).left().row();
 
         Table cardRow = new Table();
-        for (Card card : cards) {
+        int index = 0;
+        List<Card> shown = score.scoringCards().isEmpty() ? cards : score.scoringCards();
+        for (Card card : shown) {
             CardActor actor = CardActor.decorative(assets, card, false, 36);
+            if (animate) {
+                actor.startDeal(index * 0.09f, 0.32f);
+            } else {
+                actor.showInstantly();
+            }
+            index++;
             cardRow.add(actor).size(36, 50).padRight(3);
         }
         panel.add(cardRow).left().padTop(6).row();
-        panel.add(Ui.label(skin, score.type().displayName(), "h3")).left().padTop(4).row();
+        panel.add(Ui.label(skin, "MELHOR 5 \u00b7 " + score.type().displayName(), "h3"))
+                .left().padTop(4).row();
 
         Table scoreRow = new Table();
         scoreRow.add(Ui.label(skin, Integer.toString(score.chips()), "chips")).padRight(4);
@@ -61,6 +82,22 @@ public final class CombatRevealPanel extends Table {
         scoreRow.add(Ui.label(skin, Integer.toString(score.finalScore()), "final"));
         panel.add(scoreRow).left().padTop(2).row();
         return panel;
+    }
+
+    private Table communityRow(List<Card> community) {
+        Table row = new Table();
+        row.add(Ui.label(skin, "MESA ", "gold-small")).padRight(6);
+        if (community.isEmpty()) {
+            row.add(Ui.label(skin, "SEM CARTAS COMUNITáRIAS", "small"));
+            return row;
+        }
+        for (Card card : community) {
+            CardActor actor = CardActor.decorative(assets, card, false, 30);
+            actor.showInstantly();
+            row.add(actor).size(30, 42).padRight(3);
+        }
+        row.add(Ui.label(skin, "  FLOP \u00b7 TURN \u00b7 RIVER", "small")).padLeft(4);
+        return row;
     }
 
     private String widthStyle(String styleName) {

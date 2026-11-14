@@ -1,6 +1,9 @@
 package com.game.core.rules;
 
+import com.game.core.model.Card;
 import com.game.core.scoring.ScoreResult;
+
+import java.util.List;
 
 /** Compara duas jogadas e calcula o dano exatamente como as regras de referência fazem. */
 public final class CombatResolver {
@@ -9,9 +12,8 @@ public final class CombatResolver {
     }
 
     public static RoundOutcome resolve(int round, ScoreResult player1, ScoreResult player2,
-                                       java.util.List<com.game.core.model.Card> player1Cards,
-                                       java.util.List<com.game.core.model.Card> player2Cards,
-                                       GameRules rules) {
+                                       List<Card> player1Cards, List<Card> player2Cards,
+                                       List<Card> community, GameRules rules) {
         int winner = 0;
         int loser = 0;
         if (player1.finalScore() > player2.finalScore()) {
@@ -27,6 +29,14 @@ public final class CombatResolver {
             int difference = Math.abs(player1.finalScore() - player2.finalScore());
             damage = (int) Math.ceil(difference / (double) rules.damageDivisor());
         }
-        return new RoundOutcome(round, player1, player2, player1Cards, player2Cards, winner, loser, damage);
+        return new RoundOutcome(round, player1, player2, player1Cards, player2Cards,
+                community, winner, loser, damage);
+    }
+
+    /** Compatibilidade para combates sem cartas comunitárias. */
+    public static RoundOutcome resolve(int round, ScoreResult player1, ScoreResult player2,
+                                       List<Card> player1Cards, List<Card> player2Cards,
+                                       GameRules rules) {
+        return resolve(round, player1, player2, player1Cards, player2Cards, List.of(), rules);
     }
 }

@@ -109,6 +109,8 @@ class MessageCodecTest {
         engine.start();
         engine.submitPlay(1, engine.handOf(1).subList(0, 2));
         engine.submitPlay(2, engine.handOf(2).subList(0, 2));
+        engine.passSabotage(1);
+        engine.passSabotage(2);
         Envelope envelope = codec.message(MessageType.ROUND_RESULT, "s", 1,
                 new com.game.net.protocol.RoundResultPayload(engine.snapshot().lastOutcome(), 300, 300));
         var payload = codec.payload(codec.decode(codec.encode(envelope)),

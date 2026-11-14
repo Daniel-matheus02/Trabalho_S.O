@@ -17,6 +17,7 @@ java {
 
 tasks.withType(JavaCompile).configureEach {
     options.release = 21
+    options.encoding = 'UTF-8'
 }
 
 ext {
@@ -67,6 +68,7 @@ tasks.named('test') {
     testLogging {
         events 'passed', 'skipped', 'failed'
         exceptionFormat 'full'
+        showStandardStreams = true
     }
 }
 

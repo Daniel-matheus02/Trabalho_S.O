@@ -2,6 +2,7 @@ package com.game.client;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Preferences;
+import com.game.rendering.Typography;
 
 /** Preferências locais persistentes (nome do jogador, movimento, visibilidade do log). */
 public final class GameSettings {
@@ -25,7 +26,7 @@ public final class GameSettings {
     }
 
     public void setPlayerName(String name) {
-        String trimmed = name == null ? "" : name.trim();
+        String trimmed = Typography.normalize(name).trim();
         if (trimmed.isEmpty()) {
             return;
         }

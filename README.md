@@ -1,10 +1,11 @@
 # Duelo de Fichas
 
 Um duelo de cartas 1v1 inspirado no Balatro, feito como jogo desktop nativo em Java 21
-com libGDX, LWJGL3, Netty e Jackson. As regras são uma portagem fiel do protótipo
-`Duelo de Fichas.html` fornecido, ampliado com uma mesa polida, IA para um jogador,
-multiplayer em LAN e um servidor autoritativo autônomo. O modo de um jogador não precisa
-de navegador, servidor nem conexão com a internet.
+com libGDX, LWJGL3, Netty e Jackson. As regras evoluíram do protótipo `Duelo de Fichas.html`
+até a v0.6, com cartas comunitárias, economia de moedas, sabotagens e uma loja entre rodadas.
+O jogo inclui uma mesa polida, IA para um jogador, multiplayer em LAN e um servidor
+autoritativo autônomo. O modo de um jogador não precisa de navegador, servidor nem conexão
+com a internet.
 
 ---
 
@@ -130,7 +131,7 @@ No Windows os mesmos comandos funcionam no `cmd`/PowerShell depois de definir
 
 ```bash
 ./gradlew runServer   # servidor multiplayer dedicado (sem interface gráfica)
-./gradlew test        # executa a suíte de 47 testes
+./gradlew test        # executa a suíte de 54 testes
 ./gradlew dist        # gera os dois jars autônomos
 ```
 
@@ -173,19 +174,59 @@ No Windows use `gradlew.bat` em vez de `./gradlew`.
 
 ## 1. Jogabilidade (portada da especificação HTML)
 
-Cada partida começa com os dois jogadores com **300 de vida** e um **modificador global**
-aleatório compartilhado por ambos. A cada rodada os dois jogadores recebem **8 cartas** de
-um baralho novo de 52 cartas e cada um envia **de 1 a 5 cartas**. A jogada mais forte vence
-a rodada; o perdedor sofre dano.
+Cada partida começa com os dois jogadores com **300 de vida**, **10 moedas** e um
+**modificador global** aleatório compartilhado por ambos. A cada rodada os dois jogadores
+recebem **8 cartas** de um baralho novo de 52 cartas e cada um envia **exatamente 2 cartas**.
+Depois das duas jogadas a mesa abre **5 cartas comunitárias** (flop → turn → river) e a
+jogada é a **melhor combinação de 5 entre as suas 2 + as 5 da mesa**. A jogada mais forte
+vence a rodada; o perdedor sofre dano.
 
 ```
-pontuação = round(fichas x mult)
+pontuação = round(fichas x mult)   // fichas/mult calculados sobre as 5 cartas que pontuam
 dano = ceil((pontuaçãoVencedor - pontuaçãoPerdedor) / 3)
 ```
 
-Empates não causam dano. O jogador que chegar a 0 de vida perde. Depois de cada rodada não
-fatal, os dois jogadores recebem **os mesmos três curingas** e cada um escolhe um; os
-curingas se acumulam pelo resto da partida. Cada jogador tem **2 rerolls por partida**.
+Empates não causam dano. O jogador que chegar a 0 de vida perde.
+
+### Economia de moedas
+
+As moedas são uma carteira gastável na loja; fichas continuam sendo a unidade de pontuação.
+Os números abaixo são os padrões da implementação (as notas da versão fixavam apenas o preço
+crescente do reroll e o bônus de azarão):
+
+| Evento | Moedas |
+|---|---:|
+| Início da partida | 10 |
+| Fim de cada rodada (cada jogador) | +5 |
+| Bônus do vencedor da rodada | +5 |
+| Bônus de azarão (2+ derrotas seguidas) | +10 por rodada |
+| Sabotagem na loja | 8 |
+| Rerolls grátis de joker por partida | 2 |
+| Reroll pago de joker na mesma visita | 5, depois 10, 15… |
+
+O **bônus de azarão** é anti-bola-de-neve: quem perde 2 rodadas seguidas recebe +10 moedas e
+continua recebendo enquanto a sequência de derrotas durar. Vencer zera a sequência.
+
+### Sabotagens
+
+Cada jogador pode guardar no máximo **2 sabotagens**. Comprar, usar, acabou: cada carta é de
+**uso único** e só se pode usar **uma por rodada**. Depois que a mesa abre no river, os dois
+escolhem uma sabotagem ou passam; as escolhas resolvem **antes da contagem de pontos**.
+
+| Sabotagem | Efeito |
+|---|---|
+| Anti-Flush | Anula o flush do oponente nesta rodada |
+| Peso de Chumbo | O oponente perde 5 de mult |
+| Imposto do Par | O oponente perde 25 fichas se a mão final tiver par ou melhor |
+| Bloqueio de Joker | Desativa o primeiro joker do oponente nesta rodada |
+| Névoa | Anula todos os jokers do oponente nesta rodada |
+| Virada de Naipes | Inverte os naipes das 5 cartas da mesa |
+| Troca de River | Substitui a carta do river por uma nova carta do baralho |
+
+A **ordem de resolução alterna por rodada**: R1 o Jogador 1 resolve primeiro, R2 o Jogador 2,
+R3 o Jogador 1, e assim por diante. Isso importa porque sabotagens de mesa reescrevem o mesmo
+tabuleiro compartilhado em sequência. A tela mostra a ordem em destaque e o log registra
+`ORDEM|rodada|primeiro` antes de aplicar as cartas.
 
 ### Valores das mãos
 
@@ -201,8 +242,8 @@ curingas se acumulam pelo resto da partida. Cada jogador tem **2 rerolls por par
 | Quadra | 60 | 7 |
 | Straight Flush | 100 | 8 |
 
-As cartas jogadas somam fichas: ás = 11, T/J/Q/K = 10, as demais valem a face. A sequência
-A-2-3-4-5 conta como sequência.
+As 5 cartas que efetivamente pontuam somam fichas: ás = 11, T/J/Q/K = 10, as demais valem
+a face. A sequência A-2-3-4-5 conta como sequência.
 
 ### Modificadores globais (um por partida, vale para os dois)
 
@@ -210,44 +251,52 @@ A-2-3-4-5 conta como sequência.
 |---|---|
 | Mesa Rica | +20 fichas em toda jogada |
 | Pressão Alta | +1 mult em toda jogada |
-| Festa dos Naipes | +6 fichas por carta jogada |
-| Dobradinha | mult x2 ao jogar 1 ou 2 cartas |
+| Festa dos Naipes | +6 fichas por carta na mão que pontua |
+| Dobradinha | mult x2 ao jogar 1 ou 2 cartas (legado da v0.2) |
 | Ouro Corrido | +10 fichas por ouros jogado |
 
 ### Curingas (3 oferecidos por rodada, uma escolha por jogador)
 
+Os efeitos abaixo são avaliados sobre as **5 cartas que efetivamente pontuam** (a melhor mão
+entre as suas 2 + a mesa). Os curingas se acumulam pelo resto da partida.
+
 | Curinga | Efeito |
 |---|---|
-| Naipe Afiado | +15 fichas por espadas jogado |
-| Combo Quíntuplo | mult x2 ao jogar 5 cartas |
+| Naipe Afiado | +15 fichas por espadas na mão que pontua |
+| Combo Quíntuplo | mult x2 quando a mão que pontua tem 5 cartas |
 | Mão Cheia | +50 fichas com par ou melhor |
 | Rio de Fichas | +30 fichas em um flush |
 | Par Perfeito | +4 mult com par ou melhor |
-| Coração Valente | +12 fichas por copas jogado |
+| Coração Valente | +12 fichas por copas na mão que pontua |
 | Trinca de Ouro | +60 fichas com trinca ou melhor |
 | Escada Firme | +50 fichas em uma sequência |
-| Alto Risco | +40 fichas ao jogar exatamente 1 carta |
+| Alto Risco | +40 fichas em uma mão de apenas 1 carta (legado da v0.2) |
 
 ### Fluxo da rodada
 
-1. Os dois jogadores recebem 8 cartas.
-2. O jogador 1 monta e envia uma jogada.
-3. O jogador 2 monta e envia uma jogada (as cartas do adversário permanecem ocultas).
-4. O combate é revelado: pontuações, vencedor, dano e vida.
-5. Os dois jogadores confirmam o resultado.
-6. Escolha: os mesmos 3 curingas são oferecidos; cada jogador escolhe um (há rerolls).
-7. Uma nova rodada começa com mãos novas. A partida termina quando um jogador chega a 0 de
-   vida.
+1. Os dois jogadores recebem **8 cartas**.
+2. O jogador 1 escolhe e envia **2 cartas**.
+3. O jogador 2 escolhe e envia **2 cartas** (as cartas do adversário permanecem ocultas).
+4. A mesa abre **5 cartas comunitárias** (flop → turn → river).
+5. Cada jogador usa **uma sabotagem ou passa**. As cartas resolvem em ordem alternada
+   (R1 J1, R2 J2, R3 J1…) e o log registra `ORDEM` antes de aplicá-las.
+6. A pontuação é calculada com a melhor mão de 5, o dano é aplicado e todos recebem moedas
+   (vencedor ganha bônus; quem está em sequência de derrotas ganha o bônus de azarão).
+7. Os dois confirmam e vão à **loja**: os mesmos 3 jokers são oferecidos, há 3 sabotagens
+   sorteadas para comprar e cada jogador escolhe 1 joker (2 rerolls grátis; depois 5, 10,
+   15… moedas por reroll na mesma visita). Quem tiver espaço pode comprar até 2 sabotagens.
+8. Os dois confirmam **PRONTO** e uma nova rodada começa com mãos novas. A partida termina
+   quando um jogador chega a 0 de vida.
 
 ---
 
 ## 2. Um jogador
 
 `Jogar contra a CPU` inicia uma partida local contra uma IA que usa **o mesmo
-`ScoringEngine` e as mesmas regras de validação dos jogadores humanos**. Ela enumera toda
-seleção legal (todas as combinações de 1 a 5 cartas), pontua cada uma e escolhe a melhor.
-Também avalia as ofertas de curingas pelo valor marginal para a mão atual e usa rerolls
-quando as ofertas são fracas.
+`ScoringEngine` e as mesmas regras de validação dos jogadores humanos**. Ela enumera as
+combinações legais de 2 cartas, pontua cada uma junto com a mesa e escolhe a melhor. Também
+avalia as ofertas de jokers pelo valor marginal, usa rerolls grátis, escolhe sabotagens,
+compra na loja e confirma a rodada sozinha.
 
 ---
 
@@ -320,8 +369,10 @@ Tipos de mensagem: `CREATE_SESSION`, `SESSION_CREATED`, `JOIN_SESSION`, `JOIN_AC
 
 ## 4. Controles
 
-- **Mouse** — selecionar cartas, pressionar botões, escolher curingas
-- **Esc** — voltar ao menu (fim de jogo: menu; menus: tela anterior)
+- **Mouse** — selecionar cartas, usar/passar sabotagens, comprar na loja, escolher curingas
+- **COMBINAÇÕES** — botão fixo no canto inferior direito abre a tabela das 9 mãos em
+  qualquer tela, com fichas × mult, exemplo de cartas e kickers
+- **Esc** — fechar a tabela de combinações, voltar ao menu (fim de jogo: menu; menus: tela anterior)
 
 ---
 
@@ -332,6 +383,7 @@ src/main/java/com/game/
 ├── core/
 │   ├── model/     Card, Rank, Suit, Deck, HandType, HandEvaluator
 │   ├── scoring/   ScoringEngine, curingas, modificadores globais, detalhamento da pontuação
+│   ├── sabotage/  Catálogo de sabotagens de mesa/debuff
 │   ├── rules/     GameRules, CombatResolver, RoundOutcome
 │   └── state/     GameEngine (autoritativo), GameSnapshot, PlayerView
 ├── ai/            BotBrain (mesma pontuação, sem matemática de IA separada)
@@ -341,7 +393,7 @@ src/main/java/com/game/
 │   ├── network/   GameClient Netty + fluxo de ClientEvent enfileirado
 │   ├── controller/MatchSession, LocalMatchSession, NetworkMatchSession
 │   └── screens/   Menu principal, multiplayer, jogo, fim de jogo, configurações
-├── rendering/     CardActor, CardHand, HealthBar, painéis, interface procedural
+├── rendering/     CardActor, CardHand, HealthBar, ShopPanel, SabotagePanel, painéis, interface procedural
 ├── assets/        Arte procedural, atlas de texturas, fonte em pixels, skin Scene2D
 └── launcher/      DesktopLauncher, ServerLauncher, DuelGame
 ```
@@ -380,16 +432,19 @@ Telas válidas: `menu`, `multiplayer`, `settings`, `game`, `reveal`, `draft`, `g
 ./gradlew test
 ```
 
-A suíte contém atualmente 47 testes. A cobertura inclui:
+A suíte contém atualmente 54 testes. A cobertura inclui:
 
 - categorias de mão, a sequência A-5, valores das fichas e arredondamento do multiplicador
 - todos os curingas e modificadores globais, incluindo a ordem de empilhamento
 - cálculo de dano e tratamento de empates
 - ordem dos turnos, erros de validação, informação oculta, limites de escolha e rerolls
+- melhor mão de 5 entre 7 cartas e modificadores de sabotagem (Anti-Flush, Névoa, Peso, Imposto)
+- ordem alternada de sabotagem, uso único, compras por moedas e preço crescente do reroll pago
+- bônus de azarão após sequências de derrota
 - uma partida completa CPU contra CPU até o fim de jogo e a revanche
-- seleção de jogadas pela IA e avaliação de curingas
-- uma sessão de um jogador com semente fixa, com a CPU escolhendo curingas até o fim de jogo
+- seleção de jogadas pela IA com mesa comunitária, escolha de sabotagem e compras na loja
+- uma sessão de um jogador com semente fixa, com a CPU jogando até o fim de jogo
 - ida e volta do protocolo JSON
 - rejeição de comandos duplicados na sessão, tokens de reconexão, ações inválidas
-- uma partida TCP ponta a ponta com dois clientes (criar/entrar, jogar, revelar, escolher,
-  rodada 2, reconectar)
+- uma partida TCP ponta a ponta com dois clientes (criar/entrar, jogar, sabotar, revelar,
+  loja, rodada 2, reconectar)

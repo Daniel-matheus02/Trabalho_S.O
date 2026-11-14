@@ -4,7 +4,8 @@ package com.game.core.state;
 public enum GamePhase {
     WAITING,
     BUILD,
+    SABOTAGE,
     REVEAL,
-    DRAFT,
+    SHOP,
     GAME_OVER
 }

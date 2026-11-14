@@ -71,11 +71,7 @@ public final class ScorePanel extends Table {
             label.setAlignment(Align.left);
             lines.add(label).left().growX().row();
         }
-        com.badlogic.gdx.scenes.scene2d.ui.ScrollPane scroll =
-                new com.badlogic.gdx.scenes.scene2d.ui.ScrollPane(lines, skin);
-        scroll.setScrollingDisabled(true, false);
-        scroll.setFadeScrollBars(false);
-        add(scroll).left().grow().padTop(8).expandY().top().row();
+        add(lines).left().grow().padTop(8).expandY().top().row();
     }
 
     private Table badge(String value, String unit, Color color) {

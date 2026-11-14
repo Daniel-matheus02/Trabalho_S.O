@@ -22,6 +22,15 @@ public record PlayerView(
         List<String> jokers,
         List<String> offers,
         int rerolls,
+        int nextRerollCost,
+        int coins,
+        int lossStreak,
+        List<String> sabotageHand,
+        int sabotageCount,
+        List<String> sabotageOffers,
+        boolean sabotageChosen,
+        boolean jokerPicked,
+        boolean shopReady,
         boolean ready,
         boolean rematchWanted
 ) {
@@ -30,5 +39,7 @@ public record PlayerView(
         playedCards = List.copyOf(playedCards);
         jokers = List.copyOf(jokers);
         offers = List.copyOf(offers);
+        sabotageHand = List.copyOf(sabotageHand);
+        sabotageOffers = List.copyOf(sabotageOffers);
     }
 }

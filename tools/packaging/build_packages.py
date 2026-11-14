@@ -636,6 +636,7 @@ def write_player_readme(destination: Path, game_version: str) -> None:
         "O multiplayer em LAN embutido no jogo funciona sem esse servidor dedicado.\n"
         % game_version,
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -720,7 +721,8 @@ def main() -> None:
                 digest.update(block)
         checksums.append("%s  %s" % (digest.hexdigest(), artifact.name))
         log("  %-32s %8.1f MB" % (artifact.name, artifact.stat().st_size / (1024 * 1024)))
-    (DIST / "SHA256SUMS.txt").write_text("\n".join(checksums) + "\n", encoding="utf-8")
+    (DIST / "SHA256SUMS.txt").write_text("\n".join(checksums) + "\n", encoding="utf-8",
+                                         newline="\n")
 
     log("Concluído. Os artefatos estão em %s" % DIST)
 

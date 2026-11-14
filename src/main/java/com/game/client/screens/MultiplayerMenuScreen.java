@@ -26,6 +26,7 @@ public final class MultiplayerMenuScreen extends BaseScreen {
 
     private final Table body = new Table();
     private final Label statusLabel = new Label("", skin, "small");
+    private boolean formsNarrow;
     private final TextField nameField;
     private final TextField hostPortField;
     private final TextField joinIpField;
@@ -84,10 +85,17 @@ public final class MultiplayerMenuScreen extends BaseScreen {
     private void showForms() {
         waitingRoomShown = false;
         body.clearChildren();
+        formsNarrow = Gdx.graphics.getWidth() < 1240;
         Table columns = new Table();
-        columns.add(hostPanel()).width(550).padRight(24);
-        columns.add(joinPanel()).width(550);
-        body.add(columns).center().expand();
+        columns.top();
+        if (formsNarrow) {
+            columns.add(hostPanel()).growX().uniformX().row();
+            columns.add(joinPanel()).growX().uniformX().padTop(16);
+        } else {
+            columns.add(hostPanel()).width(0).growX().uniformX().padRight(24).top();
+            columns.add(joinPanel()).width(0).growX().uniformX().top();
+        }
+        body.add(columns).grow().center();
     }
 
     private Table hostPanel() {
@@ -97,7 +105,7 @@ public final class MultiplayerMenuScreen extends BaseScreen {
         Label description = Ui.wrapLabel(skin,
                 "ABRE UM SERVIDOR AUTORITATIVO NESTA M\u00c1QUINA. COMPARTILHE O C\u00d3DIGO E O IP "
                         + "DA LAN COM O OUTRO JOGADOR.", "body-dim");
-        panel.add(description).width(500).left().padTop(4).row();
+        panel.add(description).growX().left().padTop(4).row();
 
         panel.add(Ui.label(skin, "PORTA TCP", "gold-small")).left().padTop(18).row();
         panel.add(hostPortField).width(220).height(44).left().row();
@@ -105,7 +113,7 @@ public final class MultiplayerMenuScreen extends BaseScreen {
         Label hint = Ui.wrapLabel(skin,
                 "VOC\u00ca TAMB\u00c9M PODE JOGAR NESTA M\u00c1QUINA: O CLIENTE CONECTA EM 127.0.0.1.",
                 "small");
-        panel.add(hint).width(500).left().padTop(12).row();
+        panel.add(hint).growX().left().padTop(12).row();
         panel.add(Ui.button(skin, "CRIAR SALA E AGUARDAR", "gold", this::host))
                 .width(360).height(50).padTop(20).left().row();
         return panel;
@@ -118,7 +126,7 @@ public final class MultiplayerMenuScreen extends BaseScreen {
         Label description = Ui.wrapLabel(skin,
                 "INFORME O IP DO HOST, A PORTA E O C\u00d3DIGO DE 6 CARACTERES DA SALA.",
                 "body-dim");
-        panel.add(description).width(500).left().padTop(4).row();
+        panel.add(description).growX().left().padTop(4).row();
 
         Table fields = new Table();
         fields.left();
@@ -411,6 +419,14 @@ public final class MultiplayerMenuScreen extends BaseScreen {
             // Recai para o loopback.
         }
         return "127.0.0.1";
+    }
+
+    @Override
+    protected void onResize(float width, float height) {
+        boolean narrow = width < 1240f;
+        if (narrow != formsNarrow && !waitingRoomShown) {
+            showForms();
+        }
     }
 
     @Override

@@ -1,6 +1,5 @@
 package com.game.rendering;
 
-import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.game.assets.GameAssets;
 import com.game.core.model.Card;
@@ -19,11 +18,17 @@ public final class CardHand extends WidgetGroup {
     private List<Card> cards = List.of();
     private Set<Integer> selected = Set.of();
     private boolean interactive;
+    private boolean animateDeals = true;
     private IntConsumer onToggle;
 
     public CardHand(GameAssets assets) {
         this.assets = assets;
         setTransform(false);
+    }
+
+    /** Liga ou desliga a animação de distribuição (respeita a preferência de movimento reduzido). */
+    public void setAnimateDeals(boolean animateDeals) {
+        this.animateDeals = animateDeals;
     }
 
     public void setOnToggle(IntConsumer onToggle) {
@@ -60,8 +65,12 @@ public final class CardHand extends WidgetGroup {
                         }
                     });
             actor.setInteractive(interactive);
-            actor.getColor().a = 0f;
-            actor.addAction(Actions.sequence(Actions.delay(index * 0.03f), Actions.fadeIn(0.16f)));
+            actor.getColor().a = 1f;
+            if (animateDeals) {
+                actor.startDeal(index * 0.055f, 0.34f);
+            } else {
+                actor.showInstantly();
+            }
             actors.add(actor);
             addActor(actor);
         }

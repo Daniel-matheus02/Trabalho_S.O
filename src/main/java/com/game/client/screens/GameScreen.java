@@ -5,7 +5,6 @@ import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
@@ -15,6 +14,7 @@ import com.game.client.controller.MatchSession;
 import com.game.client.controller.NetworkMatchSession;
 import com.game.client.network.ClientEvent;
 import com.game.core.model.Card;
+import com.game.core.rules.GameRuleException;
 import com.game.core.rules.RoundOutcome;
 import com.game.core.scoring.ScoreResult;
 import com.game.core.scoring.ScoringEngine;
@@ -25,10 +25,13 @@ import com.game.core.state.PlayerView;
 import com.game.launcher.DuelGame;
 import com.game.rendering.CardHand;
 import com.game.rendering.CombatRevealPanel;
-import com.game.rendering.DraftPanel;
+import com.game.rendering.FixedHeightScrollPane;
 import com.game.rendering.Palette;
 import com.game.rendering.PlayerPanel;
+import com.game.rendering.SabotagePanel;
 import com.game.rendering.ScorePanel;
+import com.game.rendering.ShopPanel;
+import com.game.rendering.Typography;
 import com.game.rendering.Ui;
 
 import java.util.ArrayList;
@@ -53,13 +56,14 @@ public final class GameScreen extends BaseScreen {
     private final ScorePanel scorePanel;
     private final Table logPanel;
     private final Table logContent;
-    private final ScrollPane logScroll;
+    private final FixedHeightScrollPane logScroll;
     private final Label roundLabel;
     private final Label turnLabel;
     private final Label globalName;
     private final Label globalDesc;
     private final Label statusLabel;
-    private final DraftPanel draftPanel;
+    private final ShopPanel shopPanel;
+    private final SabotagePanel sabotagePanel;
     private final CombatRevealPanel revealPanel;
 
     private final Set<Integer> selection = new LinkedHashSet<>();
@@ -75,6 +79,25 @@ public final class GameScreen extends BaseScreen {
     private float gameOverDelay = -1f;
     private Table toast;
 
+    // Estrutura responsiva: cabeçalho + corpo (coluna esquerda + barra lateral).
+    private final Table root = new Table();
+    private final Table header = new Table();
+    private final Table titleBox = new Table();
+    private final Table headerPills = new Table();
+    private final FillTable body = new FillTable();
+    private final Table left = new Table();
+    private final Table right = new Table();
+    private boolean stacked;
+    private float layoutWidth = -1f;
+    private float layoutHeight = -1f;
+
+    /** Altura reservada ao log: o conteúdo rola dentro dela e nunca empurra o layout. */
+    private static final float LOG_PREF_HEIGHT = 100f;
+    /** Largura fixa da barra lateral; abaixo do limite o corpo inteiro empilha. */
+    private static final float SIDEBAR_WIDTH = 320f;
+    /** Abaixo desta largura disponível o layout empilha (cabeçalho e barra lateral). */
+    private static final float STACK_WIDTH = 1120f;
+
     public GameScreen(DuelGame game, MatchSession session, Runnable cleanup) {
         super(game);
         this.session = session;
@@ -85,6 +108,7 @@ public final class GameScreen extends BaseScreen {
         this.ownPanel = new PlayerPanel(assets, myId, false, true);
         this.hand = new CardHand(assets);
         this.hand.setOnToggle(this::toggleCard);
+        this.hand.setAnimateDeals(!game.settings().reducedMotion());
         this.handPlaceholder = Ui.label(skin, "", "body-dim");
         this.handPlaceholder.setAlignment(Align.center);
         this.handPlaceholder.setVisible(false);
@@ -92,20 +116,25 @@ public final class GameScreen extends BaseScreen {
         this.stageArea.pad(16).top().left();
         this.actionBar = new Table();
         this.scorePanel = new ScorePanel(assets);
-        this.roundLabel = Ui.label(skin, "", "gold-small");
-        this.turnLabel = Ui.label(skin, "", "body-dim");
+        this.roundLabel = Ui.label(skin, "", Typography.HEADER);
+        this.turnLabel = Ui.label(skin, "", Typography.HEADER);
         this.globalName = Ui.label(skin, "", "h3");
         this.globalDesc = Ui.wrapLabel(skin, "", "small");
         this.statusLabel = Ui.label(skin, "", "small");
         this.logContent = new Table();
         this.logContent.top().left();
-        this.logScroll = new ScrollPane(logContent, skin);
+        this.logScroll = new FixedHeightScrollPane(logContent, skin, LOG_PREF_HEIGHT);
         this.logScroll.setFadeScrollBars(false);
         this.logScroll.setScrollingDisabled(true, false);
         this.logPanel = Ui.panel(assets, "panelDeep");
         this.logPanel.pad(10).top().left();
-        this.draftPanel = new DraftPanel(assets);
+        this.shopPanel = new ShopPanel(assets);
+        this.sabotagePanel = new SabotagePanel(assets);
         this.revealPanel = new CombatRevealPanel(assets);
+        boolean reducedMotion = game.settings().reducedMotion();
+        this.revealPanel.setAnimateDeals(!reducedMotion);
+        this.ownPanel.setEffectsEnabled(!reducedMotion);
+        this.opponentPanel.setEffectsEnabled(!reducedMotion);
 
         build();
         refresh(true);
@@ -116,62 +145,137 @@ public final class GameScreen extends BaseScreen {
     }
 
     private void build() {
-        Table root = new Table();
         root.setFillParent(true);
         root.pad(14).top();
         stage.addActor(root);
 
-        Table header = new Table();
-        header.add(Ui.label(skin, "DUELO DE FICHAS", "h2")).left();
+        titleBox.left();
+        titleBox.add(Ui.label(skin, "DUELO DE FICHAS", Typography.TITLE)).left();
 
-        Table roundPill = new Table();
-        roundPill.setBackground(new NinePatchDrawable(new com.badlogic.gdx.graphics.g2d.NinePatch(
-                assets.patch("pillWhite"))).tint(Palette.rgba(0xe6b64c, 0.18f)));
-        roundPill.add(roundLabel).pad(5, 12, 5, 12);
+        Table roundPill = pill(roundLabel);
+        Table turnPill = pill(turnLabel);
+        headerPills.add(roundPill).height(36).padRight(10);
+        headerPills.add(turnPill).height(36).padRight(12);
+        headerPills.add(Ui.button(skin, "MENU", "ghost", this::leaveToMenu))
+                .width(90).height(36);
 
-        header.add().expandX();
-        header.add(roundPill).padRight(14);
-        header.add(turnLabel).padRight(14);
-        header.add(Ui.button(skin, "MENU", "ghost", this::leaveToMenu)).width(90).height(34);
-        root.add(header).growX().height(40).padBottom(8).row();
+        root.add(header).growX().height(56).padBottom(8).row();
 
-        Table body = new Table();
+        buildLeftColumn();
+        buildRightColumn();
 
-        Table left = new Table();
-        left.add(opponentPanel).growX().height(104).padBottom(6).row();
-        left.add(stageArea).growX().minHeight(190).expandY().padBottom(6).row();
-        left.add(ownPanel).growX().height(80).padBottom(4).row();
+        body.top().left();
+        root.add(body).grow().row();
+
+        root.add(statusLabel).growX().height(22).padTop(4);
+
+        relayout(stage.getWidth(), stage.getHeight(), true);
+    }
+
+    private Table pill(Label label) {
+        // Fundo escuro: as duas pílulas do cabeçalho usam o MESMO fundo, padding e fonte, com
+        // contraste alto para o texto HEADER.
+        Table pill = new Table();
+        pill.setBackground(new NinePatchDrawable(
+                new com.badlogic.gdx.graphics.g2d.NinePatch(assets.patch("panelDeep"))));
+        pill.add(label).pad(6, 14, 6, 14);
+        return pill;
+    }
+
+    private void buildLeftColumn() {
+        left.top().left();
+        left.add(opponentPanel).growX().height(92).padBottom(6).row();
+        left.add(stageArea).growX().minHeight(196).expandY().padBottom(6).row();
+        left.add(ownPanel).growX().height(72).padBottom(4).row();
         Stack handStack = new Stack(hand, handPlaceholder);
-        left.add(handStack).growX().height(132).padBottom(2).row();
-        left.add(actionBar).growX().height(42).row();
-        body.add(left).grow().padRight(14);
+        left.add(handStack).growX().height(108).padBottom(2).row();
+        left.add(actionBar).growX().height(40).row();
+    }
 
-        Table right = new Table();
+    private void buildRightColumn() {
+        right.top().left();
+
         Table globalPanel = Ui.panel(assets, "panelGold");
         globalPanel.pad(12).top().left();
-        globalPanel.add(Ui.label(skin, "MODIFICADOR GLOBAL", "gold-small")).left().row();
+        globalPanel.add(Ui.label(skin, "MODIFICADOR GLOBAL", Typography.CAPTION)).left().row();
         globalPanel.add(globalName).left().padTop(2).row();
-        globalPanel.add(globalDesc).width(292).left().padTop(2).row();
-        right.add(globalPanel).growX().height(98).padBottom(8).row();
-        right.add(scorePanel).growX().height(250).padBottom(8).row();
+        globalPanel.add(globalDesc).growX().left().padTop(2).row();
+        right.add(globalPanel).growX().height(100).padBottom(6).row();
 
-        logPanel.add(Ui.label(skin, "LOG DO PROTOCOLO", "gold-small")).left().row();
+        right.add(scorePanel).growX().height(230).padBottom(6).row();
+
+        logPanel.clearChildren();
+        logPanel.add(Ui.label(skin, "LOG DO PROTOCOLO", Typography.CAPTION)).left().row();
         logPanel.add(logScroll).grow().padTop(6).row();
-        right.add(logPanel).grow().row();
+        // O log ocupa o espaço que sobra na coluna: a altura é do layout, não do conteúdo.
+        right.add(logPanel).grow().padBottom(42).row();
+    }
 
-        body.add(right).width(320).growY();
-        root.add(body).grow().row();
-        root.add(statusLabel).growX().height(20).padTop(4);
+    /**
+     * Reorganiza cabeçalho e corpo conforme a largura disponível (sem coordenadas absolutas).
+     * Largo: coluna principal + barra lateral. Estreito: cabeçalho em duas linhas e a barra
+     * lateral abaixo do tabuleiro.
+     */
+    private void relayout(float width, float height, boolean force) {
+        if (width <= 1f || height <= 1f) {
+            return;
+        }
+        float availableWidth = width - 28f;
+        boolean nextStacked = availableWidth < STACK_WIDTH;
+        if (!force && Math.abs(width - layoutWidth) < 1f
+                && Math.abs(height - layoutHeight) < 1f && stacked == nextStacked) {
+            return;
+        }
+        layoutWidth = width;
+        layoutHeight = height;
+        stacked = nextStacked;
+
+        header.clearChildren();
+        if (stacked) {
+            header.add(titleBox).left().growX().row();
+            header.add(headerPills).left().padTop(4);
+            if (root.getCell(header) != null) {
+                root.getCell(header).height(102);
+            }
+        } else {
+            header.add(titleBox).left().expandX();
+            header.add(headerPills).right();
+            if (root.getCell(header) != null) {
+                root.getCell(header).height(56);
+            }
+        }
+
+        body.clearChildren();
+        if (stacked) {
+            body.setMinimumHeight(0f);
+            body.add(left).growX().row();
+            body.add(right).growX().padTop(10).row();
+        } else {
+            // Altura mínima do corpo = janela - padding do root - cabeçalho - barra de status.
+            body.setMinimumHeight(Math.max(0f, height - headerHeight() - 62f));
+            // 320 px é a largura mínima que a coluna lateral (ScorePanel) exige; manter a barra
+            // lateral nessa largura em janelas estreitas evita recorte horizontal.
+            body.add(left).grow().padRight(14f);
+            body.add(right).width(SIDEBAR_WIDTH).growY();
+        }
+        body.invalidateHierarchy();
+    }
+
+    private float headerHeight() {
+        return stacked ? 102f : 56f;
     }
 
     // ------------------------------------------------------------------ quadro
 
     @Override
     public void render(float delta) {
-        session.tick(delta);
+        boolean referenceOpen = isReferenceOpen();
+        if (!referenceOpen) {
+            session.tick(delta);
+        }
         handleEvents();
         refresh(false);
-        if (gameOverDelay >= 0) {
+        if (!referenceOpen && gameOverDelay >= 0) {
             gameOverDelay -= delta;
             if (gameOverDelay <= 0) {
                 goToGameOver();
@@ -275,8 +379,11 @@ public final class GameScreen extends BaseScreen {
         String networkStatus = session.statusMessage();
         if (networkStatus != null && !networkStatus.isBlank()) {
             statusLabel.setText(networkStatus);
-        } else if (state.phase() == GamePhase.DRAFT) {
-            statusLabel.setText("DRAFT \u2014 CADA JOGADOR ESCOLHE 1 JOKER");
+        } else if (state.phase() == GamePhase.SABOTAGE) {
+            statusLabel.setText("SABOTAGEM \u2014 ORDEM: JOGADOR " + state.firstResolver()
+                    + " PRIMEIRO");
+        } else if (state.phase() == GamePhase.SHOP) {
+            statusLabel.setText("LOJA \u2014 ESCOLHA 1 JOKER E GASTE SUAS MOEDAS");
         } else if (state.phase() == GamePhase.REVEAL) {
             statusLabel.setText("REVELA\u00c7\u00c3O \u2014 COMPARE AS JOGADAS");
         } else {
@@ -292,13 +399,16 @@ public final class GameScreen extends BaseScreen {
         if (state.phase() == GamePhase.REVEAL) {
             return "COMBATE REVELADO";
         }
-        if (state.phase() == GamePhase.DRAFT) {
-            return state.isTurnOf(myId) ? "SUA VEZ \u2014 ESCOLHA UM JOKER" : "VEZ DO OPONENTE";
+        if (state.phase() == GamePhase.SABOTAGE) {
+            return "ORDEM DA RODADA: JOGADOR " + state.firstResolver() + " PRIMEIRO";
+        }
+        if (state.phase() == GamePhase.SHOP) {
+            return "LOJA DA RODADA";
         }
         if (state.isTurnOf(myId)) {
-            return submittedLocally ? "JOGADA ENVIADA" : "SUA VEZ \u2014 MONTE SUA JOGADA";
+            return submittedLocally ? "JOGADA ENVIADA" : "SUA VEZ \u2014 ESCOLHA 2 CARTAS";
         }
-        return "VEZ DO OPONENTE";
+        return state.phase() == GamePhase.BUILD ? "VEZ DO OPONENTE" : "AGUARDANDO";
     }
 
     private boolean canInteract(GameSnapshot state) {
@@ -352,21 +462,33 @@ public final class GameScreen extends BaseScreen {
             scorePanel.update(own, true);
             return;
         }
-        if (snapshot.phase() == GamePhase.DRAFT) {
-            scorePanel.showMessage("DRAFT DE JOKERS",
-                    "ESCOLHA UM DOS JOKERS DO PALCO. ELE VALE PARA TODAS AS PRÓXIMAS RODADAS.");
+        if (snapshot.phase() == GamePhase.SABOTAGE || snapshot.phase() == GamePhase.SHOP) {
+            scorePanel.showMessage("MESA ABERTA",
+                    "AS 5 CARTAS COMUNITÁRIAS JÁ ESTÃO NA MESA. A PONTUAÇÃO FINAL É CALCULADA "
+                            + "DEPOIS DAS SABOTAGENS.");
             return;
         }
         if (snapshot.phase() == GamePhase.GAME_OVER) {
             scorePanel.showMessage("FIM DE JOGO", "O RESULTADO FINAL APARECE NA TELA SEGUINTE.");
             return;
         }
-        ScoreResult preview = scoring.score(selectedCards(), me.jokers(), snapshot.globalModifierId());
-        scorePanel.update(preview, !selection.isEmpty() && snapshot.phase() == GamePhase.BUILD);
+        ScoreResult preview = scoring.score(combineWithCommunity(selectedCards()), me.jokers(),
+                snapshot.globalModifierId());
+        scorePanel.update(preview, selection.size() == snapshot.rules().maxPlay()
+                && snapshot.phase() == GamePhase.BUILD);
+    }
+
+    private List<Card> combineWithCommunity(List<Card> cards) {
+        List<Card> pool = new ArrayList<>(cards);
+        if (snapshot != null) {
+            pool.addAll(snapshot.community());
+        }
+        return pool;
     }
 
     private void submitPlay() {
-        if (snapshot == null || !canInteract(snapshot) || selection.isEmpty()) {
+        if (snapshot == null || !canInteract(snapshot)
+                || selection.size() != snapshot.rules().maxPlay()) {
             return;
         }
         List<Card> cards = selectedCards();
@@ -386,7 +508,10 @@ public final class GameScreen extends BaseScreen {
     private void rebuildStage(GameSnapshot state, PlayerView me, PlayerView opponent) {
         String signature = state.phase() + ":" + state.round() + ":" + state.currentPlayer()
                 + ":" + me.ready() + ":" + submittedLocally + ":" + selection.size()
-                + ":" + me.offers() + ":" + (state.lastOutcome() == null ? 0 : state.lastOutcome().round())
+                + ":" + me.offers() + ":" + me.sabotageOffers() + ":" + me.sabotageHand()
+                + ":" + me.sabotageChosen() + ":" + me.jokerPicked() + ":" + me.shopReady()
+                + ":" + me.coins() + ":" + state.firstResolver() + ":" + state.community()
+                + ":" + (state.lastOutcome() == null ? 0 : state.lastOutcome().round())
                 + ":" + me.hp() + ":" + opponent.hp();
         if (signature.equals(stageSignature)) {
             return;
@@ -403,10 +528,15 @@ public final class GameScreen extends BaseScreen {
                             state.player(1), state.player(2));
                 }
             }
-            case DRAFT -> {
-                boolean myTurn = state.isTurnOf(myId);
-                draftPanel.update(me.offers(), myTurn && !me.ready(), me.ready(), this::pickJoker);
-                stageArea.add(draftPanel).grow().row();
+            case SABOTAGE -> {
+                sabotagePanel.update(state, me, canSabotage(state, me),
+                        this::useSabotage, this::passSabotage);
+                stageArea.add(sabotagePanel).grow().row();
+            }
+            case SHOP -> {
+                boolean canAct = canShop(state);
+                shopPanel.update(state, me, canAct, this::pickJoker, this::buySabotage);
+                stageArea.add(shopPanel).grow().row();
             }
             case GAME_OVER -> {
                 stageArea.add(Ui.label(skin, "FIM DE JOGO", "winner")).padBottom(10).row();
@@ -420,11 +550,12 @@ public final class GameScreen extends BaseScreen {
         boolean myTurn = state.isTurnOf(myId);
         String whoStyle = myId == 1 ? "h2-p1" : "h2-p2";
         if (myTurn && !submittedLocally) {
-            stageArea.add(Ui.label(skin, "SUA VEZ \u2014 MONTE SUA JOGADA", whoStyle))
+            stageArea.add(Ui.label(skin, "SUA VEZ \u2014 ESCOLHA 2 CARTAS", whoStyle))
                     .left().padBottom(6).row();
-            stageArea.add(Ui.label(skin,
-                    "SELECIONE DE 1 A 5 CARTAS. A PR\u00c9VIA \u00c0 DIREITA MOSTRA FICHAS \u00d7 MULT.",
-                    "body-dim")).left().row();
+            stageArea.add(Ui.wrapLabel(skin,
+                    "VOCÊ JOGA 2 CARTAS. A MESA ABRE 5 (FLOP · TURN · RIVER) E A MELHOR MÃO DE 5 "
+                            + "ENTRE SUAS 2 + AS 5 DA MESA PONTUA.",
+                    "body-dim")).growX().left().row();
             stageArea.add(Ui.label(skin, selection.size() + " / " + state.rules().maxPlay()
                     + " CARTAS SELECIONADAS", "small")).left().padTop(10).row();
         } else if (submittedLocally) {
@@ -456,11 +587,70 @@ public final class GameScreen extends BaseScreen {
     }
 
     private void pickJoker(int index) {
-        if (snapshot == null || snapshot.phase() != GamePhase.DRAFT || !snapshot.isTurnOf(myId)) {
+        if (snapshot == null || snapshot.phase() != GamePhase.SHOP || !canShop(snapshot)
+                || snapshot.player(myId).jokerPicked()) {
             return;
         }
-        session.pickJoker(index);
+        applyAction(() -> session.pickJoker(index));
+    }
+
+    private void buySabotage(int index) {
+        if (snapshot == null || snapshot.phase() != GamePhase.SHOP || !canShop(snapshot)) {
+            return;
+        }
+        PlayerView me = snapshot.player(myId);
+        if (me.sabotageCount() >= snapshot.rules().maxSabotages()
+                || me.coins() < snapshot.rules().sabotagePrice()) {
+            return;
+        }
+        applyAction(() -> session.buySabotage(index));
+    }
+
+    private void useSabotage(int index) {
+        if (snapshot == null || snapshot.phase() != GamePhase.SABOTAGE
+                || !canSabotage(snapshot, snapshot.player(myId))) {
+            return;
+        }
+        applyAction(() -> session.useSabotage(index));
+    }
+
+    private void passSabotage() {
+        if (snapshot == null || snapshot.phase() != GamePhase.SABOTAGE
+                || !canSabotage(snapshot, snapshot.player(myId))) {
+            return;
+        }
+        applyAction(session::passSabotage);
+    }
+
+    private void ready() {
+        if (snapshot == null || snapshot.phase() != GamePhase.SHOP || !canShop(snapshot)
+                || !snapshot.player(myId).jokerPicked()
+                || snapshot.player(myId).shopReady()) {
+            return;
+        }
+        applyAction(session::ready);
+    }
+
+    /** Executa uma ação do jogador e mantém a tela sincronizada mesmo se o motor recusá-la. */
+    private void applyAction(Runnable action) {
+        try {
+            action.run();
+        } catch (GameRuleException refused) {
+            showToast(refused.getMessage(), Palette.BAD);
+        }
         refresh(true);
+    }
+
+    private boolean canShop(GameSnapshot state) {
+        return state.phase() == GamePhase.SHOP && isConnected();
+    }
+
+    private boolean canSabotage(GameSnapshot state, PlayerView me) {
+        return state.phase() == GamePhase.SABOTAGE && !me.sabotageChosen() && isConnected();
+    }
+
+    private boolean isConnected() {
+        return !(session instanceof NetworkMatchSession network) || network.client().isConnected();
     }
 
     // ------------------------------------------------------------------ ações
@@ -468,6 +658,8 @@ public final class GameScreen extends BaseScreen {
     private void rebuildActions(GameSnapshot state, PlayerView me) {
         String signature = state.phase() + ":" + state.currentPlayer() + ":" + me.ready()
                 + ":" + submittedLocally + ":" + selection.size() + ":" + me.rerolls()
+                + ":" + me.nextRerollCost() + ":" + me.coins() + ":" + me.jokerPicked()
+                + ":" + me.shopReady() + ":" + me.sabotageChosen()
                 + ":" + (session instanceof NetworkMatchSession network && network.client().isConnected());
         if (signature.equals(actionSignature)) {
             return;
@@ -481,12 +673,14 @@ public final class GameScreen extends BaseScreen {
         switch (state.phase()) {
             case BUILD -> {
                 if (state.isTurnOf(myId) && !submittedLocally) {
-                    info.add(Ui.label(skin, selection.isEmpty()
-                            ? "SELECIONE AO MENOS 1 CARTA" : "PRONTO PARA ENVIAR", "small")).left();
+                    boolean exactly = selection.size() == state.rules().maxPlay();
+                    info.add(Ui.label(skin, exactly
+                            ? "PRONTO PARA ENVIAR" : "SELECIONE EXATAMENTE "
+                            + state.rules().maxPlay() + " CARTAS", "small")).left();
                     TextButton clear = Ui.button(skin, "LIMPAR", "ghost", this::clearSelection);
                     clear.setDisabled(selection.isEmpty());
                     TextButton submit = Ui.button(skin, "ENVIAR JOGADA", "gold", this::submitPlay);
-                    submit.setDisabled(selection.isEmpty());
+                    submit.setDisabled(!exactly);
                     buttons.add(clear).width(130).height(44).padRight(10);
                     buttons.add(submit).width(210).height(44);
                 } else {
@@ -495,27 +689,46 @@ public final class GameScreen extends BaseScreen {
                     info.add(waiting).left();
                 }
             }
+            case SABOTAGE -> {
+                info.add(Ui.label(skin, me.sabotageChosen()
+                        ? "ESCOLHA REGISTRADA. AGUARDANDO O OPONENTE..."
+                        : "USE UMA SABOTAGEM OU PASSE", "small")).left();
+                TextButton pass = Ui.button(skin, me.sabotageChosen() ? "AGUARDANDO..."
+                        : "PASSAR", "ghost", this::passSabotage);
+                pass.setDisabled(me.sabotageChosen() || !canSabotage(state, me));
+                buttons.add(pass).width(180).height(44);
+            }
             case REVEAL -> {
                 info.add(Ui.label(skin, me.ready()
                         ? "VOC\u00ca J\u00c1 CONFIRMOU. AGUARDANDO O OPONENTE..."
-                        : "CONFIRME PARA IR AO DRAFT DE JOKERS", "small")).left();
+                        : "CONFIRME PARA IR À LOJA", "small")).left();
                 TextButton advance = Ui.button(skin, me.ready() ? "AGUARDANDO..." : "CONTINUAR", "gold",
                         this::advance);
                 advance.setDisabled(me.ready());
                 buttons.add(advance).width(210).height(44);
             }
-            case DRAFT -> {
-                if (state.isTurnOf(myId) && !me.ready()) {
-                    info.add(Ui.label(skin, "CLIQUE EM UM DOS 3 JOKERS ACIMA", "small")).left();
-                    TextButton reroll = Ui.button(skin, "ROLAR DE NOVO (RESTAM "
-                            + me.rerolls() + ")", "green", this::reroll);
-                    reroll.setDisabled(me.rerolls() <= 0);
-                    buttons.add(reroll).width(290).height(44);
+            case SHOP -> {
+                boolean canAct = canShop(state);
+                String rerollLabel;
+                boolean canReroll;
+                if (me.rerolls() > 0) {
+                    rerollLabel = "ROLAR JOKERS (GRÁTIS x" + me.rerolls() + ")";
+                    canReroll = canAct && !me.jokerPicked();
                 } else {
-                    info.add(Ui.label(skin, me.ready()
-                            ? "ESCOLHA REGISTRADA. AGUARDANDO O OPONENTE..."
-                            : "AGUARDANDO O OPONENTE ESCOLHER...", "body-dim")).left();
+                    rerollLabel = "ROLAR JOKERS (" + me.nextRerollCost() + " MOEDAS)";
+                    canReroll = canAct && !me.jokerPicked() && me.coins() >= me.nextRerollCost();
                 }
+                TextButton reroll = Ui.button(skin, rerollLabel, "green", this::reroll);
+                reroll.setDisabled(!canReroll);
+
+                info.add(Ui.label(skin, me.jokerPicked()
+                        ? "JOKER ESCOLHIDO. COMPRE SABOTAGENS OU CONFIRME."
+                        : "ESCOLHA 1 JOKER NA LOJA", "small")).left();
+                TextButton confirm = Ui.button(skin, me.shopReady() ? "AGUARDANDO..."
+                        : "PRONTO", "gold", this::ready);
+                confirm.setDisabled(!canAct || !me.jokerPicked() || me.shopReady());
+                buttons.add(reroll).width(360).height(44).padRight(10);
+                buttons.add(confirm).width(150).height(44);
             }
             case GAME_OVER -> info.add(Ui.label(skin, "FIM DA PARTIDA", "small")).left();
             default -> {
@@ -537,13 +750,19 @@ public final class GameScreen extends BaseScreen {
     }
 
     private void advance() {
-        session.advance();
-        refresh(true);
+        if (snapshot == null || snapshot.phase() != GamePhase.REVEAL
+                || snapshot.player(myId).ready()) {
+            return;
+        }
+        applyAction(session::advance);
     }
 
     private void reroll() {
-        session.reroll();
-        refresh(true);
+        if (snapshot == null || snapshot.phase() != GamePhase.SHOP || !canShop(snapshot)
+                || snapshot.player(myId).jokerPicked()) {
+            return;
+        }
+        applyAction(session::reroll);
     }
 
     // ------------------------------------------------------------------ animação de combate
@@ -629,7 +848,7 @@ public final class GameScreen extends BaseScreen {
                 case "draft" -> "log-draft";
                 default -> "log";
             };
-            Label line = Ui.label(skin, entry.text(), style);
+            Label line = Ui.label(skin, breakable(entry.text()), style);
             line.setWrap(true);
             line.setAlignment(Align.left);
             logContent.add(line).left().growX().padBottom(2).row();
@@ -637,6 +856,14 @@ public final class GameScreen extends BaseScreen {
         logContent.pack();
         logScroll.layout();
         logScroll.setScrollPercentY(1f);
+    }
+
+    /**
+     * O protocolo separa campos com "|", "," e ":" sem espaços; sem estas quebras o Label não
+     * consegue quebrar a linha e o texto vazaria para fora do painel lateral.
+     */
+    private static String breakable(String text) {
+        return text.replace("|", "| ").replace(",", ", ").replace(":", ": ");
     }
 
     // ------------------------------------------------------------------ navegação
@@ -671,8 +898,31 @@ public final class GameScreen extends BaseScreen {
     }
 
     @Override
+    protected void onResize(float width, float height) {
+        relayout(width, height, false);
+    }
+
+    @Override
     protected void onEscape() {
         leaveToMenu();
+    }
+
+    /** Tabela do corpo que ocupa ao menos a altura do viewport quando há espaço sobrando. */
+    private static final class FillTable extends Table {
+        private float minimumHeight;
+
+        FillTable() {
+            top().left();
+        }
+
+        void setMinimumHeight(float value) {
+            minimumHeight = Math.max(0f, value);
+        }
+
+        @Override
+        public float getPrefHeight() {
+            return Math.max(minimumHeight, super.getPrefHeight());
+        }
     }
 
     @Override
