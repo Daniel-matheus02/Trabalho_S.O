@@ -30,7 +30,7 @@ import java.util.Set;
  * Motor de regras autoritativo de uma partida. Não sabe nada sobre renderização ou rede.
  *
  * <p>Fluxo: iniciar &rarr; distribuir 8 cartas &rarr; cada jogador envia exatamente 5 cartas &rarr;
- * cada jogador recebe uma única mão embaralhada de 3 jokers + 3 sabotagens e escolhe até
+ * cada jogador recebe uma única mão embaralhada de 4 jokers + 3 sabotagens e escolhe até
  * {@link GameRules#maxPowersPlayed()} cartas dela &rarr; pontuação e dano (poderes na ordem
  * alternada) &rarr; revelação &rarr; próxima rodada. Quando nenhum poder está configurado, a
  * rodada resolve assim que as duas mãos são enviadas. Todos os métodos que alteram estado são
@@ -220,6 +220,11 @@ public final class GameEngine {
         if (cards == null || cards.size() != rules.maxPlay()) {
             throw new GameRuleException("INVALID_SELECTION",
                     "É preciso escolher exatamente " + rules.maxPlay() + " cartas");
+        }
+        for (Card card : cards) {
+            if (card == null) {
+                throw new GameRuleException("INVALID_SELECTION", "A seleção contém uma carta nula");
+            }
         }
         Set<Card> distinct = new HashSet<>(cards);
         if (distinct.size() != cards.size()) {

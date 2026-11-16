@@ -5,6 +5,9 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.math.Matrix4;
+import com.game.rendering.PowerCardActor;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.game.client.controller.LocalMatchSession;
 import com.game.client.screens.BaseScreen;
@@ -73,7 +76,15 @@ public final class ScreenshotProbe {
         screens.put("tooltip-revelacao", tooltipSlotScreen(game));
         screens.put("configuracoes", new SettingsScreen(game));
 
+        // Tamanhos de carta: 8 cartas na mão (com seleção elevada) nos dois tamanhos pedidos.
+        LocalMatchSession cardSession = new LocalMatchSession("QA");
+        GameScreen cardScreen = new GameScreen(game, cardSession, null);
+        cardScreen.demoSelect(4);
+        render(cardScreen, 1365, 695, output.resolve("cartas-1365x695.png"));
+        render(cardScreen, 1920, 1080, output.resolve("cartas-1920x1080.png"));
+
         int[][] sizes = {
+                {1365, 695},
                 {1366, 768},
                 {1920, 1080},
                 {1536, 864},   // 1920x1080 @ 125%
@@ -93,7 +104,137 @@ public final class ScreenshotProbe {
         renderTooltipPopin(game, output);
         renderBurnFrames(game, output);
         renderResolutionFrames(game, output);
+        renderStage8Shots(game, output);
         System.out.println("[ScreenshotProbe] PNGs em " + output.toAbsolutePath());
+    }
+
+
+    /** Provas estáticas da Stage 8 no tamanho reportado 1365x695. */
+    private static void renderStage8Shots(DuelGame game, Path output) {
+        int width = 1365;
+        int height = 695;
+        GameScreen build = new GameScreen(game, new LocalMatchSession("QA"), null);
+        build.probeOverflow(width, height);
+        build.probeStage().act(1f);
+        captureStage(build, width, height, output.resolve("mesa-inicio-1365x695.png"));
+        build.demoSelect(5);
+        build.demoSubmit();
+        build.render(1f / 60f);
+        build.probeStage().act(1.2f);
+        captureStage(build, width, height, output.resolve("mesa-jogada-1365x695.png"));
+
+        GameScreen flip = new GameScreen(game, revealSession(), null);
+        flip.probeOverflow(width, height);
+        flip.probeStage().act(0.4f);
+        captureStage(flip, width, height, output.resolve("mesa-flip-1365x695.png"));
+
+        GameScreen powers = new GameScreen(game, powerSession(), null);
+        powers.probeOverflow(width, height);
+        for (int i = 0; i < 900 && !powers.demoTransitionDone(); i++) {
+            powers.probeStage().act(1f / 60f);
+        }
+        powers.probeStage().act(1.2f);
+        powers.demoSelectPowers(2);
+        powers.demoHoverPower(PowerKind.JOKER);
+        powers.probeStage().act(0.2f);
+        captureStage(powers, width, height, output.resolve("poderes-7-1365x695.png"));
+        captureStage(powers, width, height, output.resolve("layout-final-1365x695.png"));
+    }
+
+    private static void captureStage(BaseScreen screen, int width, int height, Path file) {
+        FrameBuffer framebuffer = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, false);
+        framebuffer.begin();
+        Gdx.gl.glClearColor(0.05f, 0.18f, 0.13f, 1f);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        screen.probeStage().draw();
+        Pixmap raw = ScreenUtils.getFrameBufferPixmap(0, 0, width, height);
+        framebuffer.end();
+        writePng(raw, width, height, file);
+        framebuffer.dispose();
+        System.out.println("[ScreenshotProbe] " + file + " " + width + "x" + height);
+    }
+
+
+    /** Prova de pixel: um joker desenhado pelo PowerCardActor deve ser igual ao PNG nativo. */
+    public static void runJokerPixelMatch(DuelGame game) {
+        java.util.Map<String, String> files = java.util.Map.ofEntries(
+                java.util.Map.entry("naipe_afiado", "Briga_de_espada.png"),
+                java.util.Map.entry("ouro_ardente", "Chuva_de_ouro.png"),
+                java.util.Map.entry("coracao", "cortem_a_cabeca.png"),
+                java.util.Map.entry("pau_potente", "Pau_potente.png"),
+                java.util.Map.entry("escada", "Escada_alta.png"),
+                java.util.Map.entry("rio", "o_mar_esta_para_fichas.png"),
+                java.util.Map.entry("par_mult", "Par_perfeito.png"),
+                java.util.Map.entry("trinca_ouro", "tres_e_mais_gostoso.png"),
+                java.util.Map.entry("quintuplus", "quintuplos.png"));
+        int failures = 0;
+        for (java.util.Map.Entry<String, String> entry : files.entrySet()) {
+            Pixmap source = new Pixmap(Gdx.files.internal("assets/jokers/" + entry.getValue()));
+            int w = source.getWidth();
+            int h = source.getHeight();
+            PowerCardActor actor = new PowerCardActor(game.assets(),
+                    new PowerCard(PowerKind.JOKER, entry.getKey()), false, null);
+            actor.setShadowEnabled(false);
+            actor.showInstantly();
+            actor.setSize(w, h);
+            actor.setPosition(0f, 0f);
+            FrameBuffer fb = new FrameBuffer(Pixmap.Format.RGBA8888, w, h, false);
+            SpriteBatch batch = new SpriteBatch();
+            batch.setProjectionMatrix(new Matrix4().setToOrtho2D(0f, 0f, w, h));
+            fb.begin();
+            Gdx.gl.glClearColor(0f, 0f, 0f, 0f);
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+            batch.begin();
+            actor.draw(batch, 1f);
+            batch.end();
+            Pixmap rendered = ScreenUtils.getFrameBufferPixmap(0, 0, w, h);
+            fb.end();
+            int[] equal = new int[4];
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int a = source.getPixel(x, y);
+                    if (sameRgba(a, rendered.getPixel(x, y))) {
+                        equal[0]++;
+                    }
+                    if (sameRgba(a, rendered.getPixel(w - 1 - x, y))) {
+                        equal[1]++;
+                    }
+                    if (sameRgba(a, rendered.getPixel(x, h - 1 - y))) {
+                        equal[2]++;
+                    }
+                    if (sameRgba(a, rendered.getPixel(w - 1 - x, h - 1 - y))) {
+                        equal[3]++;
+                    }
+                }
+            }
+            int best = Math.max(Math.max(equal[0], equal[1]), Math.max(equal[2], equal[3]));
+            double ratio = best / (double) (w * h);
+            System.out.printf("[JokerPixelMatch] %s %.4f%n", entry.getKey(), ratio);
+            if (ratio < 0.99) {
+                failures++;
+            }
+            rendered.dispose();
+            source.dispose();
+            batch.dispose();
+            fb.dispose();
+        }
+        if (failures > 0) {
+            throw new IllegalStateException("joker-pixel-match: " + failures + " falha(s)");
+        }
+    }
+
+    private static boolean sameRgba(int a, int b) {
+        int alphaA = (a >>> 24) & 0xff;
+        int alphaB = (b >>> 24) & 0xff;
+        if (alphaA < 64 || alphaB < 64) {
+            return true;
+        }
+        for (int shift = 0; shift <= 24; shift += 8) {
+            if (Math.abs(((a >> shift) & 0xff) - ((b >> shift) & 0xff)) > 2) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Filmstrip da resolução: voos dos poderes, tooltips, flips e início da contagem final. */
@@ -195,6 +336,11 @@ public final class ScreenshotProbe {
             framebuffer.end();
             Path file = output.resolve("queima-t" + targetMs + ".png");
             writePng(raw, width, height, file);
+            try {
+                Files.copy(file, output.resolve("queima-nevoeira-t" + targetMs + ".png"),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception ignored) {
+            }
             System.out.println("[ScreenshotProbe] " + file);
         }
         framebuffer.dispose();
@@ -211,10 +357,11 @@ public final class ScreenshotProbe {
     private static GameScreen tooltipScreen(DuelGame game, PowerKind kind) {
         GameScreen screen = new GameScreen(game, powerSession(), null);
         screen.probeOverflow(1366, 768);
-        screen.probeStage().act(4f);
-        screen.probeStage().act(1f);
-        screen.probeStage().act(1f);
-        screen.probeStage().act(0.2f);
+        // A mão de poderes só nasce no fim da contagem/queima: avança até ela existir.
+        for (int i = 0; i < 900 && !screen.demoTransitionDone(); i++) {
+            screen.probeStage().act(1f / 60f);
+        }
+        screen.probeStage().act(0.6f);
         screen.demoHoverPower(kind);
         screen.probeStage().act(0.2f);
         return screen;
@@ -500,7 +647,7 @@ public final class ScreenshotProbe {
     }
 
     private static GameRules powerRules() {
-        return new GameRules(300, 8, 5, 3, 3, 3, 2);
+        return new GameRules(300, 8, 5, 3, 4, 3, 2);
     }
 
     private static void tickUntil(LocalMatchSession session, GamePhase phase, int maxTicks) {

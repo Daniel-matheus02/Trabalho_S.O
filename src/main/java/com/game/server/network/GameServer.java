@@ -30,8 +30,13 @@ public final class GameServer implements AutoCloseable {
     private Channel serverChannel;
 
     public GameServer(ServerConfig config) {
+        this(config, 0L);
+    }
+
+    /** Servidor com sementes determinísticas para as sessões (testes de rede). */
+    public GameServer(ServerConfig config, long seed) {
         this.config = config;
-        this.sessions = new SessionManager(config, codec);
+        this.sessions = new SessionManager(config, codec, new java.util.Random(seed));
     }
 
     public void start() throws InterruptedException {

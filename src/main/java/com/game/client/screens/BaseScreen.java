@@ -99,14 +99,16 @@ public abstract class BaseScreen extends ScreenAdapter {
 
     /**
      * Verificação de QA: aplica um tamanho lógico, força o layout da árvore e devolve qualquer
-     * ator visível cujos limites ultrapassem as bordas horizontais da janela.
+     * ator visível que ultrapasse as bordas da janela (os quatro lados), dois controles que se
+     * sobreponham ou um controle que não receba o clique no seu próprio centro.
      */
     public List<String> probeOverflow(int width, int height) {
         resize(width, height);
         layoutTree(stage.getRoot());
         List<String> problems = new ArrayList<>();
-        collectOverflow(stage.getRoot(), true, width, problems);
+        collectOverflow(stage.getRoot(), true, width, height, problems);
         collectOverlaps(stage.getRoot(), problems);
+        collectHitProblems(problems);
         return problems;
     }
 
@@ -126,7 +128,7 @@ public abstract class BaseScreen extends ScreenAdapter {
         }
     }
 
-    private static void collectOverflow(Actor actor, boolean parentVisible, int width,
+    private static void collectOverflow(Actor actor, boolean parentVisible, int width, int height,
                                         List<String> problems) {
         boolean visible = parentVisible && actor.isVisible() && actor.getColor().a > 0.01f;
         if (!visible) {
@@ -135,15 +137,43 @@ public abstract class BaseScreen extends ScreenAdapter {
         Vector2 position = actor.localToStageCoordinates(new Vector2());
         float left = position.x;
         float right = position.x + actor.getWidth();
-        if (left < -0.5f || right > width + 0.5f) {
+        float bottom = position.y;
+        float top = position.y + actor.getHeight();
+        if (left < -0.5f || right > width + 0.5f || bottom < -0.5f || top > height + 0.5f) {
             if (problems.size() < 5) {
                 problems.add(actor.getClass().getSimpleName()
-                        + "[" + Math.round(left) + ".." + Math.round(right) + "]");
+                        + "[" + Math.round(left) + ".." + Math.round(right) + " x "
+                        + Math.round(bottom) + ".." + Math.round(top) + "] fora de "
+                        + width + "x" + height);
             }
         }
         if (actor instanceof Group group) {
             for (Actor child : group.getChildren()) {
-                collectOverflow(child, true, width, problems);
+                collectOverflow(child, true, width, height, problems);
+            }
+        }
+    }
+
+    /**
+     * QA: o clique no centro de cada controle interativo precisa chegar nele — um controle coberto
+     * por outro (ou fora da área clicável) é um bug de layout, não de desenho.
+     */
+    private void collectHitProblems(List<String> problems) {
+        List<Actor> controls = new ArrayList<>();
+        collectControls(stage.getRoot(), true, controls);
+        for (Actor control : controls) {
+            if (!control.isTouchable()) {
+                continue;
+            }
+            Vector2 center = new Vector2(control.getWidth() / 2f, control.getHeight() / 2f);
+            control.localToStageCoordinates(center);
+            Actor hit = stage.hit(center.x, center.y, true);
+            boolean ok = hit != null && (hit == control || isAncestor(control, hit)
+                    || isAncestor(hit, control));
+            if (!ok && problems.size() < 12) {
+                problems.add("HIT " + control.getClass().getSimpleName()
+                        + " em (" + Math.round(center.x) + "," + Math.round(center.y)
+                        + ") devolve " + describeHit(hit));
             }
         }
     }
@@ -160,6 +190,10 @@ public abstract class BaseScreen extends ScreenAdapter {
                 Actor a = controls.get(i);
                 Actor b = controls.get(j);
                 if (isAncestor(a, b) || isAncestor(b, a)) {
+                    continue;
+                }
+                // Cartas lado a lado dentro do mesmo leque (mão/poderes) sobrepõem de propósito.
+                if (sharesFan(a, b)) {
                     continue;
                 }
                 Vector2 pa = a.localToStageCoordinates(new Vector2());
@@ -184,7 +218,7 @@ public abstract class BaseScreen extends ScreenAdapter {
             return;
         }
         if (actor instanceof com.badlogic.gdx.scenes.scene2d.ui.Button
-                || actor instanceof com.game.rendering.CardActor) {
+                || actor instanceof com.game.rendering.HandCardActor) {
             out.add(actor);
         }
         if (actor instanceof Group group) {
@@ -192,6 +226,34 @@ public abstract class BaseScreen extends ScreenAdapter {
                 collectControls(child, true, out);
             }
         }
+    }
+
+    /** Verdadeiro quando os dois atores são cartas do MESMO leque (mão ou mão de poderes). */
+    private static boolean sharesFan(Actor a, Actor b) {
+        Actor fanA = fanOf(a);
+        return fanA != null && fanA == fanOf(b);
+    }
+
+    private static Actor fanOf(Actor actor) {
+        for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
+            if (parent instanceof com.game.rendering.CardHand
+                    || parent instanceof com.game.rendering.PowerHand) {
+                return parent;
+            }
+        }
+        return null;
+    }
+
+
+    private static String describeHit(Actor hit) {
+        if (hit == null) {
+            return "nada";
+        }
+        StringBuilder text = new StringBuilder(hit.getClass().getSimpleName());
+        for (Actor parent = hit.getParent(); parent != null; parent = parent.getParent()) {
+            text.append('<').append(parent.getClass().getSimpleName());
+        }
+        return text.toString();
     }
 
     private static boolean isAncestor(Actor possibleAncestor, Actor actor) {

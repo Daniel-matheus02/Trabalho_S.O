@@ -183,6 +183,9 @@ public final class HandBurnEffect extends Actor {
         float x = ownCards.isEmpty()
                 ? getWidth() * 0.5f : ownCards.get(0).x + ownCards.get(0).width * 2f;
         float y = ownCards.isEmpty() ? getHeight() * 0.25f : ownCards.get(0).y + 16f;
+        for (int i = 0; i < 16; i++) {
+            smoke.smoke(x + (i - 8) * 14f, y, 180f, 22f + (i % 4) * 5f, 2);
+        }
         smoke.smoke(x, y, 150f, 40f, 22);
         embers.fire(x, y, 110f, 26f, 12);
     }

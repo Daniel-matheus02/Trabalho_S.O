@@ -23,10 +23,18 @@ final class ClientHandler extends SimpleChannelInboundHandler<String> {
     protected void channelRead0(ChannelHandlerContext ctx, String message) {
         try {
             Envelope envelope = client.codec().decode(message);
+            com.game.diagnostics.CrashLog.protocol("IN", envelope.type(),
+                    message.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                    envelope.messageId());
             client.onEnvelope(envelope);
         } catch (ProtocolException e) {
             LOG.warning("Mensagem malformada do servidor: " + e.getMessage());
             client.onEnvelopeError("BAD_MESSAGE", e.getMessage());
+        } catch (RuntimeException e) {
+            // Nunca propague para exceptionCaught: isso fecharia o canal e iniciaria o laço de
+            // reconexão por causa de uma única mensagem ruim.
+            LOG.log(java.util.logging.Level.WARNING, "Erro inesperado ao receber mensagem", e);
+            client.onEnvelopeError("BAD_MESSAGE", "Erro ao processar mensagem: " + e.getMessage());
         }
     }
 

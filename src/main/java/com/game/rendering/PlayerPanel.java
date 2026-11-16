@@ -137,14 +137,12 @@ public final class PlayerPanel extends Table {
             backRow.add(Ui.label(skin, "SEM CARTAS", "small"));
             return;
         }
-        int shown = Math.min(count, 6);
+        int shown = Math.min(count, 7);
         for (int i = 0; i < shown; i++) {
             CardActor back = CardActor.decorative(assets, null, true, 18);
             backRow.add(back).width(18f).height(25f).padRight(3);
             backActors.add(back);
         }
-        backRow.add(Ui.label(skin, count + (powers ? " PODERES" : " CARTAS"), "small"))
-                .padLeft(4);
     }
 
     /** Versos atualmente exibidos, usados pela queima da mão do oponente. */

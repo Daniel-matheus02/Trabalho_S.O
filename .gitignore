@@ -7,5 +7,6 @@ reasonix/
 *.iml
 .idea/
 *.log
+logs/
 screenshots/
 __pycache__/

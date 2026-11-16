@@ -17,6 +17,7 @@ public final class ServerLauncher {
     }
 
     public static void main(String[] args) {
+        com.game.diagnostics.CrashLog.install();
         ServerConfig config;
         try {
             config = configure(args);

@@ -62,15 +62,15 @@ class LocalMatchSessionTest {
     @DisplayName("a CPU trava os poderes e a próxima rodada começa sem poderes antigos")
     void botLocksPowersAndNextRoundStarts() {
         LocalMatchSession session = new LocalMatchSession("Tester",
-                new GameRules(300, 8, 5, 3, 3, 3, 2), new Random(11));
+                new GameRules(300, 8, 5, 3, 4, 3, 2), new Random(11));
 
         session.submitPlay(session.snapshot().player(1).hand().subList(0, 5));
         tickUntil(session, GamePhase.SABOTAGE);
 
         GameSnapshot powers = session.snapshot();
-        assertEquals(6, powers.player(1).powerHand().size());
-        assertEquals(6, powers.player(1).powerCount());
-        assertEquals(6, powers.player(2).powerCount());
+        assertEquals(7, powers.player(1).powerHand().size());
+        assertEquals(7, powers.player(1).powerCount());
+        assertEquals(7, powers.player(2).powerCount());
         assertTrue(powers.player(2).powerHand().isEmpty(), "a CPU oculta seus poderes");
 
         session.lockPowers(List.of(0, 1));

@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BotBrainTest {
 
-    private static final GameRules POWERS = new GameRules(300, 8, 5, 3, 3, 3, 2);
+    private static final GameRules POWERS = new GameRules(300, 8, 5, 3, 4, 3, 2);
 
     private final ScoringEngine scoring = new ScoringEngine();
     private final BotBrain brain = new BotBrain(scoring, 5);
@@ -63,8 +63,8 @@ class BotBrainTest {
 
     @Test
     void enumeratesEverySubsetOfSizeZeroToTwo() {
-        List<List<Integer>> subsets = BotBrain.subsets(6, 2);
-        assertEquals(6 + 15, subsets.size(), "21 subconjuntos não vazios; o vazio é a base");
+        List<List<Integer>> subsets = BotBrain.subsets(7, 2);
+        assertEquals(7 + 21, subsets.size(), "28 subconjuntos não vazios; o vazio é a base");
         for (List<Integer> subset : subsets) {
             assertTrue(subset.size() <= 2);
             assertEquals(subset.size(), subset.stream().distinct().count());

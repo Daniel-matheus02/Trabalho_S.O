@@ -54,6 +54,8 @@ public final class RoundPresenter {
 
     private final int[] heldHp = new int[3];
     private GameSnapshot current;
+    /** Último resultado anunciado por ROUND_RESULT, mesmo antes do instantâneo que o contém. */
+    private RoundOutcome announcedOutcome;
     private int trackedRound = -1;
     private boolean tableCounted;
     private boolean finalCounted;
@@ -100,6 +102,7 @@ public final class RoundPresenter {
         }
         boolean newSnapshot = current == null || current.version() != state.version();
         current = state;
+        RoundOutcome outcome = outcomeFor(state);
 
         if (counting && newSnapshot) {
             // Um instantâneo novo no meio da contagem conclui a contagem imediatamente.
@@ -131,12 +134,12 @@ public final class RoundPresenter {
         if (!counting && !resolving) {
             if (state.phase() == GamePhase.SABOTAGE && !tableCounted) {
                 startTableCount(state);
-            } else if (state.phase() == GamePhase.REVEAL && state.lastOutcome() != null
+            } else if (state.phase() == GamePhase.REVEAL && outcome != null
                     && !finalCounted) {
                 if (resolutionPlayer != null && !reducedMotion && !resolutionPlayed) {
-                    startResolution(state);
+                    startResolution(state, outcome);
                 } else {
-                    startFinalCount(state);
+                    startFinalCount(state, outcome);
                 }
             }
         }
@@ -145,6 +148,52 @@ public final class RoundPresenter {
             heldHp[1] = state.player(1).hp();
             heldHp[2] = state.player(2).hp();
         }
+    }
+
+    /**
+     * Recebe o resultado anunciado por ROUND_RESULT. A apresentação aceita os quatro tipos de
+     * mensagem em qualquer ordem: o resultado só é usado quando o instantâneo de REVEAL ainda
+     * não o contém.
+     */
+    public void onOutcome(RoundOutcome outcome) {
+        if (outcome == null) {
+            return;
+        }
+        if (announcedOutcome == null || outcome.round() >= announcedOutcome.round()) {
+            announcedOutcome = outcome;
+        }
+    }
+
+    /** Resultado efetivo: o do instantâneo, ou o anunciado por ROUND_RESULT para a mesma rodada. */
+    private RoundOutcome outcomeFor(GameSnapshot state) {
+        if (state.lastOutcome() != null) {
+            return state.lastOutcome();
+        }
+        if (announcedOutcome != null && announcedOutcome.round() == state.round()) {
+            return announcedOutcome;
+        }
+        return null;
+    }
+
+    /**
+     * Reconstrução após um erro de apresentação/reconexão: descarta todo o estado local e
+     * reaplica o último instantâneo do zero, pelo mesmo caminho de uma atualização normal.
+     */
+    public void recover(GameSnapshot state) {
+        trackedRound = -1;
+        tableCounted = false;
+        finalCounted = false;
+        powerHandReady = false;
+        counting = false;
+        finalCounting = false;
+        burning = false;
+        resolving = false;
+        resolutionPlayed = false;
+        holdingHp = false;
+        countVersion = -1;
+        current = null;
+        announcedOutcome = null;
+        onSnapshot(state);
     }
 
     private void startTableCount(GameSnapshot state) {
@@ -198,30 +247,41 @@ public final class RoundPresenter {
         });
     }
 
-    private void startResolution(GameSnapshot state) {
+    private void startResolution(GameSnapshot state, RoundOutcome outcome) {
         resolutionPlayed = true;
         resolving = true;
         finalCounting = false;
-        resolutionPlayer.play(state.lastOutcome(), () -> {
+        resolutionPlayer.play(outcome, () -> {
             resolving = false;
             startFinalCount(current);
         });
     }
 
     private void startFinalCount(GameSnapshot state) {
+        startFinalCount(state, outcomeFor(state));
+    }
+
+    private void startFinalCount(GameSnapshot state, RoundOutcome outcome) {
         resolving = false;
+        if (state == null || outcome == null) {
+            // Sem resultado não há contagem final; o próximo instantâneo tenta novamente.
+            finalCounted = false;
+            counting = false;
+            notifyChanged();
+            return;
+        }
         ScoreResult own = myId == 1
-                ? state.lastOutcome().player1Score() : state.lastOutcome().player2Score();
+                ? outcome.player1Score() : outcome.player2Score();
         ScoreResult theirs = myId == 1
-                ? state.lastOutcome().player2Score() : state.lastOutcome().player1Score();
+                ? outcome.player2Score() : outcome.player1Score();
         // Numa sessão criada já em REVEAL não houve instantâneo anterior: reconstrói a vida
         // anterior a partir do dano registrado no resultado.
         if (heldHp[1] < 0) {
-            int damage = state.lastOutcome().loser() == 1 ? state.lastOutcome().damage() : 0;
+            int damage = outcome.loser() == 1 ? outcome.damage() : 0;
             heldHp[1] = state.player(1).hp() + damage;
         }
         if (heldHp[2] < 0) {
-            int damage = state.lastOutcome().loser() == 2 ? state.lastOutcome().damage() : 0;
+            int damage = outcome.loser() == 2 ? outcome.damage() : 0;
             heldHp[2] = state.player(2).hp() + damage;
         }
         finalCounted = true;

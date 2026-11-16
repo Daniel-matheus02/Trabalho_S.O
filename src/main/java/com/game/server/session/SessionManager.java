@@ -37,6 +37,7 @@ public final class SessionManager implements AutoCloseable {
 
     private final ServerConfig config;
     private final MessageCodec codec;
+    private final java.util.Random random;
     private final Map<String, GameSession> sessionsById = new ConcurrentHashMap<>();
     private final Map<String, GameSession> sessionsByCode = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler =
@@ -48,8 +49,14 @@ public final class SessionManager implements AutoCloseable {
     private final AtomicInteger sessionCounter = new AtomicInteger();
 
     public SessionManager(ServerConfig config, MessageCodec codec) {
+        this(config, codec, new java.util.Random());
+    }
+
+    /** Permite um servidor determinístico para testes de rede. */
+    public SessionManager(ServerConfig config, MessageCodec codec, java.util.Random random) {
         this.config = config;
         this.codec = codec;
+        this.random = random == null ? new java.util.Random() : random;
     }
 
     public void start() {
@@ -98,7 +105,8 @@ public final class SessionManager implements AutoCloseable {
             throw new SessionException("SERVER_FULL", "O servidor atingiu seu limite de sessões");
         }
         String name = codec.payload(envelope, com.game.net.protocol.CreateSessionPayload.class).playerName();
-        GameSession session = new GameSession(nextCode(), config.maxPlayersPerSession(), codec);
+        GameSession session = new GameSession(nextCode(), config.maxPlayersPerSession(), codec,
+                new java.util.Random(random.nextLong()));
         sessionsById.put(session.sessionId(), session);
         sessionsByCode.put(session.code(), session);
         sessionCounter.incrementAndGet();

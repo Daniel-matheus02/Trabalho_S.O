@@ -19,6 +19,7 @@ import com.game.client.controller.MatchSession;
 import com.game.client.controller.LocalMatchSession;
 import com.game.client.controller.NetworkMatchSession;
 import com.game.client.dev.DevPreview;
+import com.game.client.layout.LayoutMetrics;
 import com.game.client.network.ClientEvent;
 import com.game.client.presentation.RoundPresenter;
 import com.game.core.model.Card;
@@ -58,6 +59,9 @@ import java.util.Set;
 /** A mesa: os dois jogadores, barras de vida, mão, prévia da pontuação ao vivo, poderes e revelação. */
 public final class GameScreen extends BaseScreen {
 
+    private static final java.util.logging.Logger LOG =
+            java.util.logging.Logger.getLogger(GameScreen.class.getName());
+
     private final MatchSession session;
     private final Runnable cleanup;
     private final int myId;
@@ -96,6 +100,7 @@ public final class GameScreen extends BaseScreen {
     private List<Card> renderedHand = List.of();
     private List<PowerCard> renderedPowerHand = List.of();
     private int renderedPowerRound = -1;
+    private long lastRecoveryAt = -10_000L;
     private GameSnapshot snapshot;
     private long lastVersion = -1;
     private String actionSignature = "";
@@ -119,6 +124,7 @@ public final class GameScreen extends BaseScreen {
     private boolean stacked;
     private float layoutWidth = -1f;
     private float layoutHeight = -1f;
+    private LayoutMetrics metrics;
 
     /** Altura reservada ao log: o conteúdo rola dentro dela e nunca empurra o layout. */
     private static final float LOG_PREF_HEIGHT = 100f;
@@ -252,10 +258,11 @@ public final class GameScreen extends BaseScreen {
         left.top().left();
         stageArea.clearChildren();
         stageArea.add(sharedTable).grow().padBottom(4).row();
-        left.add(opponentPanel).growX().fillY().height(92).padBottom(6).row();
-        left.add(stageArea).grow().minHeight(196).padBottom(6).row();
+        left.add(opponentPanel).growX().fillY().height(92).padBottom(4).row();
+        left.add(stageArea).grow().height(196).padBottom(4).row();
         left.add(ownPanel).growX().fillY().height(72).padBottom(4).row();
-        left.add(handStack).growX().fillY().height(108).padBottom(2).row();        left.add(actionBar).growX().fillY().height(40).row();
+        left.add(handStack).growX().fillY().height(108).padBottom(4).row();
+        left.add(actionBar).growX().fillY().height(42).row();
     }
 
     private void buildRightColumn() {
@@ -296,76 +303,56 @@ public final class GameScreen extends BaseScreen {
         layoutHeight = height;
         stacked = nextStacked;
 
+        metrics = LayoutMetrics.compute(width, height, nextStacked, 7f);
+        hand.setCardMetrics(metrics.cards);
+        powerHand.setCardMetrics(metrics.cards);
+        sharedTable.setCardMetrics(metrics.cards);
+
         header.clearChildren();
         if (stacked) {
             header.add(titleBox).left().growX().row();
             header.add(headerPills).left().padTop(4);
-            if (root.getCell(header) != null) {
-                root.getCell(header).height(102);
-            }
         } else {
             header.add(titleBox).left().expandX();
             header.add(headerPills).right();
-            if (root.getCell(header) != null) {
-                root.getCell(header).height(56);
-            }
+        }
+        if (root.getCell(header) != null) {
+            root.getCell(header).height(metrics.header.height());
         }
 
         body.clearChildren();
+        body.setMinimumHeight(0f);
         if (stacked) {
-            body.setMinimumHeight(0f);
             body.add(left).growX().row();
             if (showSidebar()) {
                 body.add(right).growX().padTop(10).row();
             }
-            // No modo empilhado o espaço vertical é curto: as faixas fixas encolhem para que a
-            // mesa e os botões caibam inteiros na janela mínima.
-            boolean powers = snapshot != null && snapshot.phase() == GamePhase.SABOTAGE;
-            if (left.getCell(opponentPanel) != null) {
-                left.getCell(opponentPanel).height(powers ? 64 : 72);
-            }
-            if (left.getCell(ownPanel) != null) {
-                left.getCell(ownPanel).height(powers ? 60 : 56);
-            }
-            if (left.getCell(actionBar) != null) {
-                left.getCell(actionBar).height(powers ? 32 : 36);
-            }
-            if (left.getCell(stageArea) != null) {
-                left.getCell(stageArea).height(powers ? 100 : 120);
-                left.getCell(stageArea).maxHeight(powers ? 100 : 120);
-                left.getCell(stageArea).expand(false, false);
-            }
-            if (left.getCell(handStack) != null) {
-                left.getCell(handStack).height(handStack.isVisible() ? handHeight() : 0f);
-            }
-            stageArea.pad(8);
             actionBar.padRight(240);
+            stageArea.pad(8);
         } else {
-            // Altura mínima do corpo = janela - padding do root - cabeçalho - barra de status.
-            body.setMinimumHeight(Math.max(0f, height - headerHeight() - 62f));
-            // 320 px é a largura mínima que a coluna lateral (ScorePanel) exige; manter a barra
-            // lateral nessa largura em janelas estreitas evita recorte horizontal.
             body.add(left).grow().padRight(14f);
             body.add(right).width(SIDEBAR_WIDTH).growY();
-            if (left.getCell(opponentPanel) != null) {
-                left.getCell(opponentPanel).height(92);
-            }
-            if (left.getCell(ownPanel) != null) {
-                left.getCell(ownPanel).height(72);
-            }
-            if (left.getCell(actionBar) != null) {
-                left.getCell(actionBar).height(40);
-            }
-            if (left.getCell(stageArea) != null) {
-                left.getCell(stageArea).minHeight(196);
-                left.getCell(stageArea).maxHeight(Float.MAX_VALUE);
-                left.getCell(stageArea).expand(false, true);
-            }
-            if (left.getCell(handStack) != null) {
-                left.getCell(handStack).height(handStack.isVisible() ? handHeight() : 0f);
-            }
-            stageArea.pad(16);
             actionBar.padRight(0);
+            stageArea.pad(16);
+        }
+
+        if (left.getCell(opponentPanel) != null) {
+            left.getCell(opponentPanel).height(metrics.opponentBar.height());
+        }
+        if (left.getCell(ownPanel) != null) {
+            left.getCell(ownPanel).height(metrics.ownBar.height());
+        }
+        if (left.getCell(actionBar) != null) {
+            left.getCell(actionBar).height(metrics.actionBar.height());
+        }
+        if (left.getCell(stageArea) != null) {
+            left.getCell(stageArea).height(metrics.table.height());
+            left.getCell(stageArea).minHeight(metrics.table.height());
+            left.getCell(stageArea).maxHeight(metrics.table.height());
+            left.getCell(stageArea).expand(false, false);
+        }
+        if (left.getCell(handStack) != null) {
+            left.getCell(handStack).height(handStack.isVisible() ? metrics.hand.height() : 0f);
         }
         body.invalidateHierarchy();
         left.invalidate();
@@ -396,15 +383,11 @@ public final class GameScreen extends BaseScreen {
     }
 
     private float headerHeight() {
-        return stacked ? 102f : 56f;
+        return metrics == null ? (stacked ? 102f : 56f) : metrics.header.height();
     }
 
     private float handHeight() {
-        if (snapshot != null && (snapshot.phase() == GamePhase.SABOTAGE
-                || (snapshot.phase() == GamePhase.REVEAL && presenter.isResolving()))) {
-            return stacked ? 130f : 224f;
-        }
-        return stacked ? 84f : 108f;
+        return metrics == null ? (stacked ? 108f : 224f) : metrics.hand.height();
     }
 
     /** No modo empilhado a barra lateral é omitida: a mesa e a mão precisam da altura inteira. */
@@ -416,6 +399,14 @@ public final class GameScreen extends BaseScreen {
 
     @Override
     public void render(float delta) {
+        try {
+            renderFrame(delta);
+        } catch (RuntimeException e) {
+            recoverPresentation(e);
+        }
+    }
+
+    private void renderFrame(float delta) {
         boolean referenceOpen = isReferenceOpen();
         if (!referenceOpen) {
             session.tick(delta);
@@ -464,6 +455,39 @@ public final class GameScreen extends BaseScreen {
         super.render(delta);
     }
 
+    /**
+     * Uma exceção de apresentação nunca pode encerrar o libGDX: registra, avisa e reconstrói a
+     * tela a partir do último instantâneo autoritativo (o mesmo caminho de uma reconexão).
+     */
+    private void recoverPresentation(RuntimeException failure) {
+        LOG.log(java.util.logging.Level.SEVERE, "Falha na apresentação da partida", failure);
+        com.game.diagnostics.CrashLog.write(failure, "presentation");
+        long now = System.currentTimeMillis();
+        try {
+            if (now - lastRecoveryAt > 3_000L) {
+                lastRecoveryAt = now;
+                showToast("ERRO INTERNO - log salvo", Palette.BAD);
+            }
+        } catch (RuntimeException ignored) {
+            // A própria interface pode estar inconsistente; a reconstrução abaixo é o essencial.
+        }
+        try {
+            GameSnapshot latest = session.snapshot();
+            if (latest != null) {
+                lastVersion = -1;
+                selection.clear();
+                renderedHand = List.of();
+                renderedPowerHand = List.of();
+                renderedPowerRound = -1;
+                presenter.recover(latest);
+            }
+            refresh(true);
+        } catch (RuntimeException e) {
+            LOG.log(java.util.logging.Level.SEVERE,
+                    "Falha ao reconstruir a tela a partir do instantâneo", e);
+        }
+    }
+
     private void handleEvents() {
         ClientEvent event;
         while ((event = session.pollEvent()) != null) {
@@ -488,12 +512,16 @@ public final class GameScreen extends BaseScreen {
                         showToast(status.payload().playerName() + " DESCONECTOU", Palette.BAD);
                     }
                 }
-                case ClientEvent.RoundResolved resolved ->
-                        showToast(resolved.payload().outcome().isTie()
-                                ? "EMPATE \u2014 NINGU\u00c9M PERDE VIDA"
-                                : "JOGADOR " + resolved.payload().outcome().loser()
-                                + " PERDE " + resolved.payload().outcome().damage() + " HP",
-                                resolved.payload().outcome().isTie() ? Palette.INK_DIM : Palette.BAD);
+                case ClientEvent.RoundResolved resolved -> {
+                    // O resultado é aplicado na apresentação mesmo se o instantâneo que o contém
+                    // ainda não chegou (as mensagens podem chegar em qualquer ordem).
+                    presenter.onOutcome(resolved.payload().outcome());
+                    showToast(resolved.payload().outcome().isTie()
+                            ? "EMPATE \u2014 NINGU\u00c9M PERDE VIDA"
+                            : "JOGADOR " + resolved.payload().outcome().loser()
+                            + " PERDE " + resolved.payload().outcome().damage() + " HP",
+                            resolved.payload().outcome().isTie() ? Palette.INK_DIM : Palette.BAD);
+                }
                 default -> {
                 }
             }
@@ -530,6 +558,8 @@ public final class GameScreen extends BaseScreen {
         }
         snapshot = state;
         lastVersion = state.version();
+        com.game.diagnostics.CrashLog.context(state.phase().name(), state.round(),
+                state.version());
 
         if (state.phase() != layoutPhase) {
             layoutPhase = state.phase();
@@ -858,8 +888,8 @@ public final class GameScreen extends BaseScreen {
                     clear.setDisabled(selection.isEmpty());
                     TextButton submit = Ui.button(skin, "JOGAR MÃO", "gold", this::submitPlay);
                     submit.setDisabled(!exactly);
-                    buttons.add(clear).width(130).height(44).padRight(10);
-                    buttons.add(submit).width(210).height(44);
+                    buttons.add(clear).width(130).height(36).padRight(10);
+                    buttons.add(submit).width(210).height(36);
                 } else {
                     Label waiting = Ui.label(skin, submittedLocally
                             ? "AGUARDANDO O OPONENTE..." : "AGUARDANDO SUA VEZ...", "body-dim");
@@ -885,7 +915,7 @@ public final class GameScreen extends BaseScreen {
                     TextButton confirm = Ui.button(skin,
                             "CONFIRMAR PODERES (" + powerHand.selection().size() + "/" + max + ")",
                             "gold", this::confirmPowers);
-                    buttons.add(confirm).width(290).height(44);
+                    buttons.add(confirm).width(290).height(36);
                 }
             }
             case REVEAL -> {
@@ -906,7 +936,7 @@ public final class GameScreen extends BaseScreen {
                             me.ready() ? "AGUARDANDO..." : "CONTINUAR", "gold",
                             this::advance);
                     advance.setDisabled(me.ready());
-                    buttons.add(advance).width(210).height(44);
+                    buttons.add(advance).width(210).height(36);
                 }
             }
             case GAME_OVER -> info.add(Ui.label(skin, "FIM DA PARTIDA", "small")).left();
@@ -1139,6 +1169,43 @@ public final class GameScreen extends BaseScreen {
         game.showMainMenu();
     }
 
+    // ------------------------------------------------------------------ QA
+
+    /** QA: métricas de layout em vigor (regiões e tamanhos de carta). */
+    public LayoutMetrics probeMetrics() {
+        return metrics;
+    }
+
+    /** QA: a mesa compartilhada (duas fileiras + placares). */
+    public SharedTablePanel probeTable() {
+        return sharedTable;
+    }
+
+    /** QA: mão de cartas do jogador. */
+    public CardHand probeHand() {
+        return hand;
+    }
+
+    /** QA: mão de poderes do jogador. */
+    public PowerHand probePowerHand() {
+        return powerHand;
+    }
+
+    /** QA: barra de ações (botão principal + LIMPAR). */
+    public Table probeActionBar() {
+        return actionBar;
+    }
+
+    /** QA: último instantâneo renderizado. */
+    public GameSnapshot probeSnapshot() {
+        return snapshot;
+    }
+
+    /** QA: id do jogador desta tela. */
+    public int probeMyId() {
+        return myId;
+    }
+
     public void demoSelect(int count) {
         if (snapshot == null) {
             return;
@@ -1203,6 +1270,11 @@ public final class GameScreen extends BaseScreen {
         }
     }
 
+    /** QA: confirma a revelação pelo mesmo caminho do botão CONTINUAR. */
+    public void demoAdvance() {
+        advance();
+    }
+
     /** QA: conclui resolução e contagem final para capturar o estado final. */
     public void demoFinishPresentation() {
         if (presenter.isResolving() || presenter.isCounting() || presenter.isBurning()
@@ -1216,6 +1288,15 @@ public final class GameScreen extends BaseScreen {
         if (presenter.isResolving()) {
             resolutionEffect.finishNow();
         }
+    }
+
+    /** QA: conclui a apresentação corrente e força um refresh para um estado estável. */
+    public void probeSettle() {
+        if (presenter.isResolving() || presenter.isCounting() || presenter.isBurning()
+                || presenter.isFinalCounting()) {
+            presenter.skip();
+        }
+        refresh(true);
     }
 
     /** QA: verdadeiro durante a apresentação da resolução. */

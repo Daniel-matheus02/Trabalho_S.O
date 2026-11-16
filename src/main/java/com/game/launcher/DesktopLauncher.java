@@ -10,7 +10,14 @@ public final class DesktopLauncher {
     }
 
     public static void main(String[] args) {
+        com.game.diagnostics.CrashLog.install();
         DuelGame.LaunchOptions options = DuelGame.LaunchOptions.parse(args);
+
+        // A prova de rede não precisa de janela: roda antes de qualquer inicialização do GL.
+        if ("netplay".equals(options.probe())) {
+            System.exit(com.game.qa.NetplayProbe.run(args));
+            return;
+        }
 
         // Lê a área útil real do monitor e a escala do sistema: a janela nunca abre maior que a
         // tela e nunca fica menor que o layout responsivo suporta.

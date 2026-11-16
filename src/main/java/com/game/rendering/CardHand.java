@@ -2,6 +2,8 @@ package com.game.rendering;
 
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.game.assets.GameAssets;
+import com.game.client.layout.LayoutMetrics;
+import com.game.client.layout.LayoutMetrics.CardMetrics;
 import com.game.core.model.Card;
 
 import java.util.ArrayList;
@@ -19,6 +21,7 @@ public final class CardHand extends WidgetGroup {
     private Set<Integer> selected = Set.of();
     private boolean interactive;
     private boolean animateDeals = true;
+    private CardMetrics cardMetrics = LayoutMetrics.cardMetrics(1365f, 695f);
     private IntConsumer onToggle;
 
     public CardHand(GameAssets assets) {
@@ -29,6 +32,19 @@ public final class CardHand extends WidgetGroup {
     /** Liga ou desliga a animação de distribuição (respeita a preferência de movimento reduzido). */
     public void setAnimateDeals(boolean animateDeals) {
         this.animateDeals = animateDeals;
+    }
+
+    /** Tamanho único da mão: cartas, curingas, sabotagens e versos usam este retângulo. */
+    public void setCardMetrics(CardMetrics cardMetrics) {
+        if (cardMetrics == null || cardMetrics.equals(this.cardMetrics)) {
+            return;
+        }
+        this.cardMetrics = cardMetrics;
+        invalidate();
+    }
+
+    public CardMetrics cardMetrics() {
+        return cardMetrics;
     }
 
     public void setOnToggle(IntConsumer onToggle) {
@@ -111,12 +127,16 @@ public final class CardHand extends WidgetGroup {
 
     private void applySelection() {
         for (int i = 0; i < actors.size(); i++) {
-            actors.get(i).setSelected(selected.contains(i));
+            boolean isSelected = selected.contains(i);
+            actors.get(i).setSelected(isSelected);
+            if (isSelected) {
+                actors.get(i).toFront();
+            }
         }
     }
 
     @Override
     public void layout() {
-        CardRowLayout.layout(this, actors);
+        CardRowLayout.layout(this, actors, cardMetrics);
     }
 }

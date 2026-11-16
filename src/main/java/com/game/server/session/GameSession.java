@@ -7,6 +7,7 @@ import com.game.core.state.GameEngine;
 import com.game.core.state.GamePhase;
 import com.game.core.state.GameSnapshot;
 import com.game.net.protocol.ActionPayload;
+import com.game.net.protocol.ActionType;
 import com.game.net.protocol.DamagePayload;
 import com.game.net.protocol.Envelope;
 import com.game.net.protocol.ErrorPayload;
@@ -23,8 +24,10 @@ import io.netty.channel.Channel;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -40,6 +43,7 @@ public final class GameSession {
     private final String code;
     private final MessageCodec codec;
     private final int maxPlayers;
+    private final Random random;
 
     private final Channel[] channels = new Channel[3];
     private final String[] playerNames = new String[3];
@@ -56,10 +60,16 @@ public final class GameSession {
     private GamePhase lastBroadcastPhase = GamePhase.WAITING;
 
     public GameSession(String code, int maxPlayers, MessageCodec codec) {
+        this(code, maxPlayers, codec, new Random());
+    }
+
+    /** Construtor com gerador determinístico, usado pelos testes de rede. */
+    public GameSession(String code, int maxPlayers, MessageCodec codec, Random random) {
         this.sessionId = UUID.randomUUID().toString();
         this.code = code;
         this.maxPlayers = maxPlayers;
         this.codec = codec;
+        this.random = random == null ? new Random() : random;
         this.lastActivity = System.currentTimeMillis();
     }
 
@@ -178,7 +188,8 @@ public final class GameSession {
     }
 
     private void startMatch() {
-        engine = new GameEngine(sessionId, playerNames[1], playerNames[2]);
+        engine = new GameEngine(sessionId, playerNames[1], playerNames[2], random,
+                com.game.core.rules.GameRules.DEFAULT, new com.game.core.scoring.ScoringEngine());
         engine.start();
         started = true;
         lastBroadcastRound = 0;
@@ -197,22 +208,40 @@ public final class GameSession {
             sendError(playerId, "SESSION_NOT_STARTED", "A partida ainda não começou");
             return;
         }
-        if (processedMessages.contains(envelope.messageId())) {
+        if (envelope.messageId() != null && processedMessages.contains(envelope.messageId())) {
             // Comando duplicado: não aplicá-lo duas vezes, apenas reenviar o estado atual.
-            send(playerId, MessageType.GAME_STATE_UPDATE, new StatePayload(engine.snapshotFor(playerId)));
+            sendState(playerId);
             return;
         }
-        remember(envelope.messageId());
 
         GameSnapshot before = engine.snapshot();
         try {
             apply(playerId, action);
         } catch (GameRuleException e) {
+            if (isStaleCommand(playerId, action, e)) {
+                // Comando atrasado (a rodada já avançou enquanto ele estava em trânsito):
+                // o estado atual é a resposta correta, sem erro visível para o jogador.
+                LOG.fine(() -> "Comando atrasado de " + playerId + " na sessão " + code
+                        + " (" + action.action() + "): " + e.code());
+                sendState(playerId);
+                return;
+            }
             sendError(playerId, e.code(), e.getMessage());
             return;
         } catch (IllegalArgumentException e) {
             sendError(playerId, "INVALID_CARD", e.getMessage());
             return;
+        } catch (RuntimeException e) {
+            // Um erro inesperado nunca deve derrubar a conexão: registra e responde com erro.
+            LOG.log(Level.WARNING, "Falha ao aplicar " + action.action() + " do jogador "
+                    + playerId + " na sessão " + code, e);
+            sendError(playerId, "SERVER_ERROR", "Erro inesperado ao aplicar a ação");
+            return;
+        }
+        // Só depois de a ação ter sido aplicada com sucesso o comando passa a ser considerado
+        // processado: uma tentativa rejeitada pode ser reenviada pelo cliente.
+        if (envelope.messageId() != null) {
+            remember(envelope.messageId());
         }
 
         lastActivity = System.currentTimeMillis();
@@ -230,14 +259,46 @@ public final class GameSession {
             // Revanche aceita: enviar um GAME_START novo para ambos os clientes.
             lastBroadcastRound = 0;
             for (int p = 1; p <= maxPlayers; p++) {
-                send(p, MessageType.GAME_START, new StatePayload(engine.snapshotFor(p)));
+                try {
+                    send(p, MessageType.GAME_START, new StatePayload(engine.snapshotFor(p)));
+                } catch (RuntimeException e) {
+                    LOG.log(Level.WARNING, "Falha ao enviar GAME_START para o jogador " + p, e);
+                }
             }
         }
         lastBroadcastPhase = after.phase();
     }
 
-    private void apply(int playerId, ActionPayload action) {
-        switch (action.action()) {
+    /**
+     * Um comando pode chegar depois de a rodada já ter avançado (a ação do oponente resolveu a
+     * fase enquanto ele estava em trânsito). Nesse caso a recusa é esperada e inofensiva: basta
+     * devolver o estado atual, sem exibir erro ao jogador.
+     */
+    private boolean isStaleCommand(int playerId, ActionPayload action, GameRuleException error) {
+        if (error == null || action == null) {
+            return false;
+        }
+        if ("ALREADY_LOCKED".equals(error.code())) {
+            return true;
+        }
+        if (!"WRONG_PHASE".equals(error.code())) {
+            return false;
+        }
+        // Só é atraso quando a rodada já resolveu (REVEAL/GAME_OVER): a ação veio de um
+        // instantâneo SABOTAGE que o cliente ainda não tinha atualizado.
+        GameSnapshot current = engine == null ? null : engine.snapshot();
+        if (current == null) {
+            return false;
+        }
+        boolean resolvedRound = current.phase() == GamePhase.REVEAL
+                || current.phase() == GamePhase.GAME_OVER;
+        return resolvedRound
+                && (action.action() == ActionType.LOCK_POWERS
+                || action.action() == ActionType.ADVANCE
+                || action.action() == ActionType.REMATCH);
+    }
+
+    private void apply(int playerId, ActionPayload action) {        switch (action.action()) {
             case SUBMIT_PLAY -> {
                 List<Card> cards = new ArrayList<>();
                 for (String code : action.cards()) {
@@ -263,8 +324,14 @@ public final class GameSession {
                 broadcast(MessageType.PLAYER_DAMAGE,
                         new DamagePayload(outcome.loser(), outcome.damage(), remaining));
             }
-            if (after.phase() == GamePhase.GAME_OVER) {
-                broadcast(MessageType.GAME_OVER, new GameOverPayload(after.winner(),
+            // O combate já pode ter zerado a vida; a fase só vira GAME_OVER quando os dois
+            // confirmam a revelação. O cliente precisa do GAME_OVER assim que a partida acaba.
+            if (after.phase() == GamePhase.GAME_OVER
+                    || after.player1().hp() <= 0 || after.player2().hp() <= 0) {
+                int winner = after.phase() == GamePhase.GAME_OVER
+                        ? after.winner()
+                        : (after.player1().hp() > 0 ? GameEngine.PLAYER_ONE : GameEngine.PLAYER_TWO);
+                broadcast(MessageType.GAME_OVER, new GameOverPayload(winner,
                         after.player1().hp(), after.player2().hp(), after.round()));
             }
         }
@@ -275,12 +342,32 @@ public final class GameSession {
                 state.round(), state.phase(), state.currentPlayer(), state.version()));
     }
 
+    /** Estado completo do ponto de vista de um jogador, com a serialização protegida. */
+    public synchronized void sendState(int playerId) {
+        try {
+            send(playerId, MessageType.GAME_STATE_UPDATE, new StatePayload(
+                    engine.snapshotFor(playerId)));
+        } catch (RuntimeException e) {
+            LOG.log(Level.WARNING, "Falha ao enviar o estado para o jogador " + playerId
+                    + " na sessão " + code, e);
+        }
+    }
+
+    /**
+     * Envia o estado a cada jogador individualmente. Uma falha de serialização para um jogador
+     * não pode impedir que o outro receba a atualização.
+     */
     public synchronized void broadcastState() {
         for (int p = 1; p <= maxPlayers; p++) {
             if (channels[p] != null && connected[p]) {
-                send(p, MessageType.GAME_STATE_UPDATE, new StatePayload(engine.snapshotFor(p)));
+                sendState(p);
             }
         }
+    }
+
+    /** Instantâneo autoritativo filtrado, exposto para verificações de consistência da rede. */
+    public synchronized GameSnapshot snapshotFor(int playerId) {
+        return engine == null ? null : engine.snapshotFor(playerId);
     }
 
     private void broadcastPresence() {
@@ -342,13 +429,24 @@ public final class GameSession {
         if (channel == null || !channel.isActive()) {
             return;
         }
-        channel.writeAndFlush(codec.encode(codec.message(type, sessionId, playerId, payload)))
-                .addListener(future -> {
-                    if (!future.isSuccess()) {
-                        LOG.warning(() -> "Falha ao enviar " + type + " para o jogador " + playerId
-                                + ": " + future.cause());
-                    }
-                });
+        try {
+            Envelope envelope = codec.message(type, sessionId, playerId, payload);
+            String json = codec.encode(envelope);
+            com.game.diagnostics.CrashLog.protocol("OUT", type,
+                    json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                    envelope.messageId());
+            channel.writeAndFlush(json)
+                    .addListener(future -> {
+                        if (!future.isSuccess()) {
+                            LOG.warning(() -> "Falha ao enviar " + type + " para o jogador " + playerId
+                                    + ": " + future.cause());
+                        }
+                    });
+        } catch (RuntimeException e) {
+            // Serialização de um payload não pode interromper o envio aos demais jogadores.
+            LOG.log(Level.WARNING, "Não foi possível serializar " + type + " para o jogador "
+                    + playerId + " na sessão " + code, e);
+        }
     }
 
     private void broadcast(MessageType type, Object payload) {

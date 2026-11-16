@@ -33,6 +33,7 @@ public final class PowerCardActor extends HandCardActor {
     private CardTooltip tooltip;
     private float hoverScale = 1f;
     private float hoverTilt;
+    private boolean shadow = true;
 
     public PowerCardActor(GameAssets assets, PowerCard power, boolean faceDown, Runnable onClick) {
         super(assets, faceDown || power == null, onClick);
@@ -41,6 +42,11 @@ public final class PowerCardActor extends HandCardActor {
 
     public PowerCard power() {
         return power;
+    }
+
+    /** Desliga a sombra projetada (usado pela prova de pixel do joker). */
+    public void setShadowEnabled(boolean shadow) {
+        this.shadow = shadow;
     }
 
     /** Liga o tooltip global; habilita hover mesmo em cartas não clicáveis dos slots. */
@@ -117,7 +123,7 @@ public final class PowerCardActor extends HandCardActor {
         float hop = dealMotion && reveal < 1f ? MathUtils.sin(reveal * MathUtils.PI) * 6f : 0f;
         float drop = dealMotion && reveal < 1f ? (1f - reveal) * 26f : 0f;
         float x = getX();
-        float y = getY() + lift + hop - drop;
+        float y = getY() + lift + hop - drop - dealRise;
         float centerX = x + w / 2f;
         float centerY = y + h / 2f;
         boolean transformed = Math.abs(hoverScale - 1f) > 0.001f
@@ -133,8 +139,11 @@ public final class PowerCardActor extends HandCardActor {
         }
 
         // Sombra projetada.
-        tmp.set(0f, 0f, 0f, 0.35f * alpha);
-        Draws.patch(batch, assets.patch("pillWhite"), x + 2, y - 6, w, h, tmp);
+        if (shadow) {
+            tmp.set(0f, 0f, 0f, 0.35f * alpha);
+            Draws.patch(batch, assets.patch("pillWhite"), x + 2, y - 6, w, h, tmp);
+        }
+        boolean jokerFace = !back && power.kind() == PowerKind.JOKER;
 
         // Brilho de seleção.
         if (selected) {
@@ -144,26 +153,30 @@ public final class PowerCardActor extends HandCardActor {
             batch.draw(assets.glow(), x - 14, y - 14, w + 28, h + 28);
             batch.setBlendFunction(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
             batch.setColor(Color.WHITE);
-            tmp.set(Palette.GOLD.r, Palette.GOLD.g, Palette.GOLD.b, 0.95f * alpha);
-            Draws.patch(batch, patch, x - 3, y - 3, w + 6, h + 6, tmp);
+            if (!jokerFace) {
+                tmp.set(Palette.GOLD.r, Palette.GOLD.g, Palette.GOLD.b, 0.95f * alpha);
+                Draws.patch(batch, patch, x - 3, y - 3, w + 6, h + 6, tmp);
+            }
         }
 
-        tmp.set(1f, 1f, 1f, alpha);
-        Draws.patch(batch, patch, x, y, w, h, tmp);
+        if (!jokerFace) {
+            tmp.set(1f, 1f, 1f, alpha);
+            Draws.patch(batch, patch, x, y, w, h, tmp);
+        }
 
         if (back) {
             CardVisuals.drawBack(batch, assets, x, y, w, h, alpha);
-        } else if (power.kind() == PowerKind.JOKER) {
+        } else if (jokerFace) {
             drawJoker(batch, x, y, w, h, alpha);
         } else {
             drawSabotage(batch, x, y, w, h, alpha);
         }
 
-        if (disabled) {
+        if (disabled && !jokerFace) {
             tmp.set(Palette.FELT_DARK.r, Palette.FELT_DARK.g, Palette.FELT_DARK.b, 0.35f * alpha);
             Draws.patch(batch, patch, x, y, w, h, tmp);
         }
-        if (hovered && isHoverable()) {
+        if (hovered && isHoverable() && !jokerFace) {
             tmp.set(1f, 1f, 1f, 0.05f * alpha);
             Draws.patch(batch, assets.patch("pillWhite"), x, y, w, h, tmp);
         }
@@ -175,25 +188,25 @@ public final class PowerCardActor extends HandCardActor {
 
     private void drawJoker(Batch batch, float x, float y, float w, float h, float alpha) {
         TextureRegion image = assets.jokerImage(power.id());
-        float areaW = w * 0.82f;
-        float areaH = h * 0.66f;
-        float scale = Math.min(areaW / Math.max(1, image.getRegionWidth()),
-                areaH / Math.max(1, image.getRegionHeight()));
-        float drawW = image.getRegionWidth() * scale;
-        float drawH = image.getRegionHeight() * scale;
-        float drawX = x + (w - drawW) / 2f;
-        float drawY = y + h - drawH - h * 0.10f;
         batch.setColor(1f, 1f, 1f, alpha);
-        batch.draw(image, drawX, drawY, drawW, drawH);
-        drawName(batch, Jokers.nameOf(power.id()), x, y, w, h, alpha, Palette.GOLD);
+        batch.draw(image, x, y, w, h);
     }
 
     private void drawSabotage(Batch batch, float x, float y, float w, float h, float alpha) {
-        float icon = Math.min(w * 0.44f, h * 0.26f);
-        batch.setColor(0.10f, 0.03f, 0.02f, 0.85f * alpha);
-        batch.draw(assets.region("skull"), x + (w - icon) / 2f, y + h * 0.54f, icon, icon);
-        drawName(batch, Sabotages.nameOf(power.id()), x, y, w, h, alpha, Palette.WHITE);
+        // Sabotagem não tem arte: continua um cartão vermelho procedural, com o nome legível como
+        // única identificação (e o tooltip como o resto da explicação).
+        tmp.set(0.42f, 0.10f, 0.08f, 0.97f * alpha);
+        Draws.patch(batch, assets.patch("cardRed"), x, y, w, h, tmp);
+        float icon = Math.min(w * 0.40f, h * 0.22f);
+        batch.setColor(1f, 0.93f, 0.84f, 0.92f * alpha);
+        batch.draw(assets.region("skull"), x + (w - icon) / 2f, y + h * 0.56f, icon, icon);
         batch.setColor(Color.WHITE);
+        // Faixa escura atrás do nome: contraste garantido no tamanho novo da carta.
+        tmp.set(0.07f, 0.02f, 0.02f, 0.78f * alpha);
+        Draws.patch(batch, assets.patch("pillWhite"), x + w * 0.06f, y + h * 0.06f,
+                w * 0.88f, h * 0.24f, tmp);
+        drawName(batch, Sabotages.nameOf(power.id()), x, y + h * 0.02f, w, h * 0.28f,
+                alpha, Palette.WHITE);
     }
 
     private void drawName(Batch batch, String text, float x, float y, float w, float h,

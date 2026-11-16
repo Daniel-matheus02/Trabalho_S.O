@@ -280,6 +280,111 @@ class RoundPresenterTest {
         assertTrue(presenter.isFinalCounting());
     }
 
+    @Test
+    void presentationIsIdenticalForAllTwentyFourMessageOrders() {
+        List<int[]> orders = permutations(new int[]{0, 1, 2, 3});
+        assertEquals(24, orders.size());
+        for (int[] order : orders) {
+            FakeCount count = new FakeCount();
+            int[] damageRuns = {0};
+            RoundPresenter presenter = new RoundPresenter(1, false, count, () -> { },
+                    () -> damageRuns[0]++);
+
+            // Entra na fase de poderes e conclui a contagem da mesa.
+            presenter.onSnapshot(sabotageSnapshot("order", 1));
+            count.complete();
+            assertTrue(presenter.powerHandReady());
+
+            GameSnapshot reveal = revealSnapshot(5);
+            for (int message : order) {
+                switch (message) {
+                    // TURN_CHANGED não altera a apresentação.
+                    case 0 -> { }
+                    // ROUND_RESULT anuncia o resultado.
+                    case 1 -> presenter.onOutcome(reveal.lastOutcome());
+                    // PLAYER_DAMAGE também não altera a apresentação.
+                    case 2 -> { }
+                    // GAME_STATE_UPDATE traz o instantâneo de revelação (versão pulada: 5).
+                    default -> presenter.onSnapshot(reveal);
+                }
+            }
+
+            assertTrue(presenter.isFinalCounting(),
+                    "ordem " + java.util.Arrays.toString(order) + " não iniciou a contagem final");
+            assertEquals(300, presenter.displayedHp(1, 250),
+                    "ordem " + java.util.Arrays.toString(order) + " perdeu a vida segurada");
+            assertEquals(0, damageRuns[0]);
+
+            count.complete();
+            assertFalse(presenter.isFinalCounting());
+            assertEquals(250, presenter.displayedHp(1, 250));
+            assertEquals(1, damageRuns[0], "ordem " + java.util.Arrays.toString(order));
+        }
+    }
+
+    @Test
+    void duplicateMessagesDoNotRepeatThePresentation() {
+        FakeCount count = new FakeCount();
+        int[] damageRuns = {0};
+        RoundPresenter presenter = new RoundPresenter(1, false, count, () -> { },
+                () -> damageRuns[0]++);
+        presenter.onSnapshot(sabotageSnapshot("dup", 1));
+        count.complete();
+        GameSnapshot reveal = revealSnapshot(4);
+        presenter.onSnapshot(reveal);
+        presenter.onSnapshot(reveal);
+        presenter.onOutcome(reveal.lastOutcome());
+        presenter.onOutcome(reveal.lastOutcome());
+
+        assertTrue(presenter.isFinalCounting());
+        count.complete();
+        count.complete();
+        assertEquals(1, damageRuns[0], "mensagens duplicadas não podem repetir o dano");
+        assertEquals(250, presenter.displayedHp(1, 250));
+    }
+
+    @Test
+    void announcedOutcomeIsUsedWhenTheSnapshotOmitsIt() {
+        FakeCount count = new FakeCount();
+        RoundPresenter presenter = new RoundPresenter(1, false, count, () -> { }, () -> { });
+        presenter.onSnapshot(sabotageSnapshot("announced", 1));
+        count.complete();
+
+        GameSnapshot reveal = revealSnapshot(3);
+        GameSnapshot withoutOutcome = new GameSnapshot(reveal.sessionId(), reveal.version(),
+                reveal.phase(), reveal.round(), reveal.currentPlayer(), reveal.rules(),
+                reveal.globalModifierId(), reveal.globalModifierName(),
+                reveal.globalModifierDescription(), reveal.firstResolver(),
+                reveal.player1(), reveal.player2(), null, 0, List.of());
+
+        presenter.onOutcome(reveal.lastOutcome());
+        presenter.onSnapshot(withoutOutcome);
+        assertTrue(presenter.isFinalCounting(),
+                "o resultado anunciado por ROUND_RESULT deve alimentar a contagem final");
+    }
+
+    private static List<int[]> permutations(int[] values) {
+        List<int[]> result = new java.util.ArrayList<>();
+        permute(values.clone(), 0, result);
+        return result;
+    }
+
+    private static void permute(int[] values, int index, List<int[]> result) {
+        if (index == values.length) {
+            result.add(values.clone());
+            return;
+        }
+        for (int i = index; i < values.length; i++) {
+            int tmp = values[index];
+            values[index] = values[i];
+            values[i] = tmp;
+            permute(values, index + 1, result);
+            tmp = values[index];
+            values[index] = values[i];
+            values[i] = tmp;
+        }
+    }
+
     private RoundPresenter presenter(FakeCount count, boolean reducedMotion) {
         return new RoundPresenter(1, reducedMotion, count, () -> { }, () -> { });
     }

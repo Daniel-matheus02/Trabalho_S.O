@@ -1,7 +1,11 @@
 package com.game.rendering;
 
+import com.badlogic.gdx.math.Interpolation;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.game.assets.GameAssets;
+import com.game.client.layout.LayoutMetrics;
+import com.game.client.layout.LayoutMetrics.CardMetrics;
 import com.game.core.model.PowerCard;
 import com.game.core.model.PowerKind;
 
@@ -12,7 +16,7 @@ import java.util.Set;
 import java.util.function.IntConsumer;
 
 /**
- * A mão de poderes da rodada: seis cartas na ordem enviada pelo servidor, seleção limitada por
+ * A mão de poderes da rodada: sete cartas na ordem enviada pelo servidor, seleção limitada por
  * {@link #setMaxSelected(int)} e recusa com tremor ao tentar uma terceira carta.
  */
 public final class PowerHand extends WidgetGroup {
@@ -25,6 +29,7 @@ public final class PowerHand extends WidgetGroup {
     private boolean interactive;
     private boolean animateDeals = true;
     private int maxSelected = 2;
+    private CardMetrics cardMetrics = LayoutMetrics.cardMetrics(1365f, 695f);
     private CardTooltip tooltip;
     private IntConsumer onToggle;
     private Runnable onSelectionChanged;
@@ -36,6 +41,19 @@ public final class PowerHand extends WidgetGroup {
 
     public void setAnimateDeals(boolean animateDeals) {
         this.animateDeals = animateDeals;
+    }
+
+    /** Curingas, sabotagens e versos compartilham exatamente o retângulo da mão de cartas. */
+    public void setCardMetrics(CardMetrics cardMetrics) {
+        if (cardMetrics == null || cardMetrics.equals(this.cardMetrics)) {
+            return;
+        }
+        this.cardMetrics = cardMetrics;
+        invalidate();
+    }
+
+    public CardMetrics cardMetrics() {
+        return cardMetrics;
     }
 
     public void setOnToggle(IntConsumer onToggle) {
@@ -97,7 +115,17 @@ public final class PowerHand extends WidgetGroup {
             }
             actor.getColor().a = 1f;
             if (dealCards) {
-                actor.startDeal(index * 0.1f, 0.34f);
+                actor.showInstantly();
+                actor.getColor().a = 0f;
+                actor.setScale(0.9f);
+                // A subida é um deslocamento de desenho: mexer no y do ator brigaria com o leiaute
+                // do leque (e deixava as cartas 40px acima da área da mão).
+                actor.startRise(index * 0.1f, 0.35f);
+                actor.addAction(Actions.sequence(
+                        Actions.delay(index * 0.1f),
+                        Actions.parallel(
+                                Actions.fadeIn(0.35f),
+                                Actions.scaleTo(1f, 1f, 0.35f, Interpolation.swingOut))));
             } else {
                 actor.showInstantly();
             }
@@ -219,7 +247,11 @@ public final class PowerHand extends WidgetGroup {
 
     private void applySelection() {
         for (int i = 0; i < actors.size(); i++) {
-            actors.get(i).setSelected(selected.contains(i));
+            boolean isSelected = selected.contains(i);
+            actors.get(i).setSelected(isSelected);
+            if (isSelected) {
+                actors.get(i).toFront();
+            }
         }
     }
 
@@ -231,6 +263,6 @@ public final class PowerHand extends WidgetGroup {
 
     @Override
     public void layout() {
-        CardRowLayout.layout(this, actors);
+        CardRowLayout.layout(this, actors, cardMetrics);
     }
 }

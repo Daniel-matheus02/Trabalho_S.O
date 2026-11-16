@@ -2,6 +2,7 @@ package com.game.rendering;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.NinePatch;
 import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.math.MathUtils;
@@ -15,6 +16,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
 import com.badlogic.gdx.utils.Align;
 import com.game.assets.GameAssets;
+import com.game.client.layout.LayoutMetrics;
+import com.game.client.layout.LayoutMetrics.CardMetrics;
 import com.game.core.model.Card;
 import com.game.core.model.PowerCard;
 import com.game.core.rules.RoundOutcome;
@@ -23,6 +26,7 @@ import com.game.core.state.GamePhase;
 import com.game.core.state.GameSnapshot;
 import com.game.core.state.PlayerView;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -38,15 +42,13 @@ public final class SharedTablePanel extends WidgetGroup {
 
     private static final int SLOTS = 5;
     private static final int POWER_SLOTS = 2;
-    private static final float MIN_CARD_HEIGHT = 28f;
-    private static final float MAX_CARD_HEIGHT = 110f;
-    private static final float CARD_ASPECT = 1.38f;
     private static final float LAND_DURATION = 0.35f;
     private static final float DROP_DURATION = 0.32f;
     private static final float FLIP_DURATION = 0.2f;
     private static final float FLIP_STAGGER = 0.08f;
     private static final float LAND_STAGGER = 0.04f;
-    private static final float TALLY_WIDTH = 168f;
+    /** 5 cartas + 2 poderes + os espaçamentos entre elas, em larguras de carta. */
+    private static final float TABLE_ROW_FACTOR = 8.672f;
 
     private final GameAssets assets;
     private final Skin skin;
@@ -62,11 +64,14 @@ public final class SharedTablePanel extends WidgetGroup {
     private boolean animate = true;
     private CardTooltip tooltip;
     private String signature = "";
+    private GamePhase lastPhase;
     private List<Card> shownOwn = List.of();
     private List<Card> shownOpponent = List.of();
     private boolean shownOpponentSubmitted;
     private List<CardActor> landing = List.of();
-    private float cardHeight = 46f;
+    private CardMetrics cardMetrics = LayoutMetrics.cardMetrics(1365f, 695f);
+    private float laidOutCardWidth;
+    private float laidOutCardHeight;
 
     public SharedTablePanel(GameAssets assets) {
         this.assets = assets;
@@ -76,6 +81,8 @@ public final class SharedTablePanel extends WidgetGroup {
         own = new Side(true);
         vsLabel = Ui.label(skin, "VS", "h2");
         vsLabel.setAlignment(Align.center);
+        // Rótulo decorativo: nunca intercepta o clique das cartas.
+        vsLabel.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
         opponentTally = new ScoreTally(assets, "p2");
         ownTally = new ScoreTally(assets, "p1");
         addActor(opponent);
@@ -264,8 +271,21 @@ public final class SharedTablePanel extends WidgetGroup {
         boolean opponentJustSubmitted = opponentView.submitted() && !shownOpponentSubmitted;
 
         own.apply(ownView, ownCardsChanged, animate, false);
-        opponent.apply(opponentView, opponentCardsChanged, animate,
-                opponentJustSubmitted || shownOpponent.isEmpty());
+        if (state.phase() == GamePhase.BUILD) {
+            if (!landing.isEmpty()) {
+                own.adoptLanding(animate);
+            } else {
+                own.clearCards();
+            }
+            opponent.clearCards();
+            opponent.showBacks();
+        } else if (state.phase() != GamePhase.REVEAL
+                && state.phase() != GamePhase.GAME_OVER) {
+            opponent.showBacks();
+        } else {
+            opponent.apply(opponentView, opponentCardsChanged, animate,
+                    opponentJustSubmitted || shownOpponent.isEmpty());
+        }
         boolean powersVisible = state.phase() == GamePhase.REVEAL
                 || state.phase() == GamePhase.GAME_OVER;
         own.applyPowers(ownView.playedPowers(), powersVisible);
@@ -274,6 +294,7 @@ public final class SharedTablePanel extends WidgetGroup {
         shownOpponent = opponentView.playedCards();
         shownOpponentSubmitted = opponentView.submitted();
         landing = List.of();
+        lastPhase = state.phase();
 
         applyTally(ownTally, ownView);
         applyTally(opponentTally, opponentView);
@@ -299,9 +320,27 @@ public final class SharedTablePanel extends WidgetGroup {
         tally.setValues(score.chips(), score.mult(), score.finalScore(), true);
     }
 
+    /**
+     * A mesa é SEMPRE esticada pelo layout da tela (a região da mesa é decidida em
+     * {@link LayoutMetrics}); não existe altura preferida que possa empurrar o painel para fora da
+     * região e espremer a barra de ações.
+     */
     @Override
     public float getPrefHeight() {
-        return MIN_CARD_HEIGHT * 2f + 28f;
+        return 0f;
+    }
+
+    /** Tamanho ÚNICO das cartas da mesa, fornecido pelo layout da tela. */
+    public void setCardMetrics(CardMetrics cardMetrics) {
+        if (cardMetrics == null || cardMetrics.equals(this.cardMetrics)) {
+            return;
+        }
+        this.cardMetrics = cardMetrics;
+        invalidate();
+    }
+
+    public CardMetrics cardMetrics() {
+        return cardMetrics;
     }
 
     @Override
@@ -313,29 +352,39 @@ public final class SharedTablePanel extends WidgetGroup {
     @Override
     public void layout() {
         float padding = 6f;
-        float gap = MathUtils.clamp(getHeight() * 0.16f, 12f, 44f);
-        float available = Math.max(MIN_CARD_HEIGHT,
-                (getHeight() - gap - padding * 2f) / 2f);
-        cardHeight = MathUtils.clamp(available, MIN_CARD_HEIGHT, MAX_CARD_HEIGHT);
-        float cardWidth = cardHeight / CARD_ASPECT;
+        float rowSlots = SLOTS + POWER_SLOTS;
+        // O placar é dimensionado pelo conteúdo (texto real); as cartas recebem o que sobra.
+        float tallyWidth = Math.min(ownTally.contentWidth(),
+                Math.max(60f, getWidth() * 0.45f));
+        float cardsAvailable = Math.max(0f, getWidth() - padding * 2f - 10f - tallyWidth);
+        float cardWidth = Math.min(cardMetrics.tableCardWidth(),
+                cardsAvailable / TABLE_ROW_FACTOR);
+        float cardHeight = Math.min(cardWidth * LayoutMetrics.CARD_ASPECT,
+                Math.max(1f, (getHeight() - padding * 2f - 8f) / 2f));
+        cardWidth = cardHeight / LayoutMetrics.CARD_ASPECT;
+        this.laidOutCardWidth = cardWidth;
+        this.laidOutCardHeight = cardHeight;
+
+        float gap = MathUtils.clamp(getHeight() - 2f * cardHeight - padding * 2f, 8f, 44f);
         float cardGap = Math.max(4f, cardWidth * 0.22f);
         float powerGap = cardGap * 1.6f;
-        int rowSlots = SLOTS + POWER_SLOTS;
         float rowWidth = rowSlots * cardWidth + (rowSlots - 1) * cardGap + powerGap;
-        float tallyWidth = Math.min(TALLY_WIDTH, Math.max(60f, getWidth() - rowWidth - 24f));
-        // Centraliza o conjunto cartas + placar; centralizar só a fileira empurrava o placar
-        // para dentro dos slots de poder.
         float totalWidth = rowWidth + 10f + tallyWidth;
         float startX = Math.max(padding, (getWidth() - totalWidth) / 2f);
         float tallyX = startX + rowWidth + 10f;
 
-        float block = 2f * cardHeight + gap;
-        float topY = Math.max(padding, (getHeight() + block) / 2f - cardHeight);
-        float bottomY = Math.max(padding, topY - gap - cardHeight);
+        float topY = Math.max(padding,
+                (getHeight() + 2f * cardHeight + gap) / 2f - cardHeight);
+        float bottomY = topY - gap - cardHeight;
         opponent.layoutRow(startX, topY, cardWidth, cardHeight, cardGap);
         own.layoutRow(startX, bottomY, cardWidth, cardHeight, cardGap);
-        opponentTally.setBounds(tallyX, topY, tallyWidth, cardHeight);
-        ownTally.setBounds(tallyX, bottomY, tallyWidth, cardHeight);
+        // O painel do placar nunca é maior que a fileira de cartas; fica centralizado nela e
+        // inteiro dentro da região da mesa.
+        float tallyHeight = Math.min(ownTally.getPrefHeight(), cardHeight);
+        opponentTally.setBounds(tallyX, topY + (cardHeight - tallyHeight) / 2f,
+                tallyWidth, tallyHeight);
+        ownTally.setBounds(tallyX, bottomY + (cardHeight - tallyHeight) / 2f,
+                tallyWidth, tallyHeight);
         opponentTally.validate();
         ownTally.validate();
 
@@ -343,34 +392,197 @@ public final class SharedTablePanel extends WidgetGroup {
         vsLabel.setBounds(0f, centerY - 10f, getWidth(), 24f);
     }
 
+    /** Largura efetiva das cartas da mesa neste quadro (já cabendo largura e altura). */
+    public float laidOutCardWidth() {
+        return laidOutCardWidth;
+    }
+
+    /** Altura efetiva das cartas da mesa neste quadro. */
+    public float laidOutCardHeight() {
+        return laidOutCardHeight;
+    }
+
+    /** QA: quantos espaços do lado pedido mostram verso, face para cima, ou estão vazios. */
+    public int[] probeRow(boolean mine) {
+        Side side = mine ? own : opponent;
+        int backs = 0;
+        int faceUp = 0;
+        int empty = 0;
+        for (int i = 0; i < SLOTS; i++) {
+            CardActor actor = side.slot(i).card();
+            if (actor == null) {
+                empty++;
+            } else if (actor.isFaceDown()) {
+                backs++;
+            } else {
+                faceUp++;
+            }
+        }
+        return new int[]{backs, faceUp, empty};
+    }
+
+    /** QA: nº de poderes jogados desenhados no lado e se o rótulo "SEM PODER" está visível. */
+    public int probePowerSlots(boolean mine) {
+        Side side = mine ? own : opponent;
+        int shown = 0;
+        for (int i = 0; i < POWER_SLOTS; i++) {
+            if (side.powerSlot(i).power() != null) {
+                shown++;
+            }
+        }
+        return shown;
+    }
+
+    /** QA: o rótulo "SEM PODER" está sendo desenhado? */
+    public boolean probeNoPowerVisible(boolean mine) {
+        return (mine ? own : opponent).noPower.isVisible();
+    }
+
+    /** QA: o placar do lado pedido, para checar as células de texto. */
+    public ScoreTally probeTally(boolean mine) {
+        return mine ? ownTally : opponentTally;
+    }
+
     /**
-     * Placar de um lado: nome da mão, caixa azul de FICHAS, caixa vermelha de MULT e o SCORE.
-     * A contagem animada altera os rótulos diretamente.
+     * Placar de um lado, em UMA linha de células de tamanho fixo: nome da mão em cima e, embaixo,
+     * {@code [FICHAS] x [MULT] = [PONTOS]}. Cada célula é dimensionada pelo {@link GlyphLayout} do
+     * MAIOR valor que ela pode mostrar na fonte atual (fichas 4 dígitos, mult 2, pontos 6), então
+     * nada transborda do painel escuro; o painel se dimensiona ao conteúdo e é centralizado na
+     * fileira de cartas pelo {@link SharedTablePanel}.
      */
     public static final class ScoreTally extends Table {
+
+        private static final String MAX_CHIPS = "9999";
+        private static final String MAX_MULT = "99";
+        private static final String MAX_SCORE = "999999";
+        private static final float CELL_PAD_X = 9f;
+        private static final float CELL_PAD_Y = 2f;
+        private static final float ROW_GAP = 2f;
+        private static final float BORDER_PAD = 6f;
 
         private final Label hand;
         private final Box chipsBox;
         private final Box multBox;
         private final Label score;
+        private final Label times;
+        private final Label equals;
+        private final Table cells;
+        private final GlyphLayout glyphs = new GlyphLayout();
+
+        private float chipsCellWidth;
+        private float multCellWidth;
+        private float scoreCellWidth;
+        private float pillHeight = 30f;
 
         ScoreTally(GameAssets assets, String handStyle) {
             Skin skin = assets.skin();
             setBackground(new NinePatchDrawable(new NinePatch(assets.patch("panelDeep"))));
-            pad(2, 4, 2, 4);
+            setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+            pad(BORDER_PAD, BORDER_PAD, BORDER_PAD, BORDER_PAD);
             hand = Ui.label(skin, "", handStyle);
-            add(hand).left().growX().row();
+            hand.setEllipsis(true);
+            hand.setAlignment(Align.left);
 
             Table row = new Table();
+            cells = row;
             chipsBox = new Box(assets, "CHIPS", Palette.CHIPS);
             multBox = new Box(assets, "MULT", Palette.MULT);
             score = Ui.label(skin, "", "final");
-            row.add(chipsBox).height(30).width(56);
-            row.add(Ui.label(skin, "\u00d7", "h3")).padLeft(2).padRight(2);
-            row.add(multBox).height(30).width(48);
-            row.add(Ui.label(skin, "=", "h3")).padLeft(2).padRight(2);
-            row.add(score).minWidth(32).left();
-            add(row).left().growX().padTop(1);
+            score.setAlignment(Align.right);
+            times = Ui.label(skin, "\u00d7", "h3");
+            equals = Ui.label(skin, "=", "h3");
+            row.add(chipsBox).height(pillHeight).width(chipsCellWidth);
+            row.add(times).padLeft(ROW_GAP).padRight(ROW_GAP);
+            row.add(multBox).height(pillHeight).width(multCellWidth);
+            row.add(equals).padLeft(ROW_GAP).padRight(ROW_GAP);
+            row.add(score).width(scoreCellWidth).right();
+
+            add(hand).left().growX().height(handHeight()).row();
+            add(row).left().growX().padTop(ROW_GAP);
+            measureCells();
+        }
+
+        private float handHeight() {
+            return lineHeight(hand);
+        }
+
+        /** Redimensiona as células a partir do texto real na escala de fonte corrente. */
+        private void measureCells() {
+            chipsCellWidth = Math.max(textWidth(chipsBox.value, MAX_CHIPS),
+                    textWidth(chipsBox.unit, "CHIPS")) + CELL_PAD_X * 2f;
+            multCellWidth = Math.max(textWidth(multBox.value, MAX_MULT),
+                    textWidth(multBox.unit, "MULT")) + CELL_PAD_X * 2f;
+            scoreCellWidth = textWidth(score, MAX_SCORE) + CELL_PAD_X * 2f;
+            float valueHeight = Math.max(lineHeight(chipsBox.value), lineHeight(multBox.value));
+            float unitHeight = Math.max(lineHeight(chipsBox.unit), lineHeight(multBox.unit));
+            pillHeight = Math.max(26f, valueHeight + unitHeight + CELL_PAD_Y * 2f);
+            cells.getCell(chipsBox).width(chipsCellWidth).height(pillHeight);
+            cells.getCell(multBox).width(multCellWidth).height(pillHeight);
+            cells.getCell(score).width(scoreCellWidth);
+            invalidateHierarchy();
+        }
+
+        /** Largura de célula + espaçamentos: é a largura que o painel ocupa. */
+        public float contentWidth() {
+            measureCells();
+            return BORDER_PAD * 2f + chipsCellWidth + multCellWidth + scoreCellWidth
+                    + textWidth(times, "\u00d7") * 2f + ROW_GAP * 4f + 2f;
+        }
+
+        @Override
+        public float getPrefWidth() {
+            return contentWidth();
+        }
+
+        @Override
+        public float getPrefHeight() {
+            return BORDER_PAD * 2f + handHeight() + ROW_GAP + pillHeight;
+        }
+
+        /** QA: verifica que cada célula comporta o MAIOR valor possível na fonte atual. */
+        public List<String> probeCellWidths() {
+            List<String> problems = new ArrayList<>();
+            String savedHand = hand.getText().toString();
+            String savedChips = chipsBox.value.getText().toString();
+            String savedMult = multBox.value.getText().toString();
+            String savedScore = score.getText().toString();
+            setValues(9999, 99, 999999, true);
+            setHand("FULL HOUSE \u00b7 PAR");
+            measureCells();
+            checkCell(problems, "fichas", chipsBox.value, chipsCellWidth);
+            checkCell(problems, "mult", multBox.value, multCellWidth);
+            checkCell(problems, "pontos", score, scoreCellWidth);
+            if (getWidth() > 0.5f && contentWidth() > getWidth() + 0.5f) {
+                problems.add("painel do placar menor que o conteúdo ("
+                        + Math.round(contentWidth()) + " > " + Math.round(getWidth()) + ")");
+            }
+            if (getHeight() > 0.5f && getPrefHeight() > getHeight() + 0.5f) {
+                problems.add("painel do placar baixo demais (" + Math.round(getPrefHeight())
+                        + " > " + Math.round(getHeight()) + ")");
+            }
+            setHand(savedHand);
+            chipsBox.value.setText(savedChips);
+            multBox.value.setText(savedMult);
+            score.setText(savedScore);
+            measureCells();
+            return problems;
+        }
+
+        private void checkCell(List<String> problems, String name, Label label, float cell) {
+            float needed = label.getPrefWidth() + CELL_PAD_X;
+            if (needed > cell + 0.5f) {
+                problems.add("célula de " + name + " pequena (" + Math.round(needed)
+                        + " > " + Math.round(cell) + ")");
+            }
+        }
+
+        private float textWidth(Label label, String text) {
+            glyphs.setText(label.getStyle().font, text);
+            return glyphs.width;
+        }
+
+        private static float lineHeight(Label label) {
+            return label.getStyle().font.getLineHeight();
         }
 
         public Label handLabel() {
@@ -424,14 +636,16 @@ public final class SharedTablePanel extends WidgetGroup {
     private static final class Box extends Table {
 
         private final Label value;
+        private final Label unit;
 
         Box(GameAssets assets, String unit, Color color) {
             Skin skin = assets.skin();
             setBackground(new NinePatchDrawable(new NinePatch(assets.patch("pillWhite")))
                     .tint(color));
             value = Ui.label(skin, "0", "body");
-            add(value).padTop(0).row();
-            add(Ui.label(skin, unit, "white-small")).padBottom(0);
+            this.unit = Ui.label(skin, unit, "white-small");
+            add(value).padTop(1f).row();
+            add(this.unit).padBottom(1f);
         }
     }
 
@@ -455,6 +669,7 @@ public final class SharedTablePanel extends WidgetGroup {
             }
             noPower = Ui.label(skin, "SEM PODER", "body-dim");
             noPower.setAlignment(Align.center);
+            noPower.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
             noPower.setVisible(false);
             addActor(noPower);
         }
@@ -634,7 +849,8 @@ public final class SharedTablePanel extends WidgetGroup {
         }
 
         private void showBacks() {
-            for (Slot slot : slots) {
+            for (int i = 0; i < slots.length; i++) {
+                Slot slot = slots[i];
                 if (slot.card() != null) {
                     continue;
                 }
@@ -642,6 +858,11 @@ public final class SharedTablePanel extends WidgetGroup {
                 back.setInteractive(false);
                 back.setSize(slot.getWidth(), slot.getHeight());
                 slot.setCard(back);
+                if (animate) {
+                    back.startDeal(i * 0.08f, 0.30f);
+                } else {
+                    back.showInstantly();
+                }
             }
         }
 
@@ -700,12 +921,6 @@ public final class SharedTablePanel extends WidgetGroup {
 
         @Override
         public void draw(Batch batch, float parentAlpha) {
-            if (card == null && power == null) {
-                tmp.set(Palette.FELT_DARK.r, Palette.FELT_DARK.g, Palette.FELT_DARK.b,
-                        0.55f * parentAlpha);
-                Draws.patch(batch, assets.patch("panelDeep"), getX(), getY(), getWidth(),
-                        getHeight(), tmp);
-            }
             super.draw(batch, parentAlpha);
         }
     }

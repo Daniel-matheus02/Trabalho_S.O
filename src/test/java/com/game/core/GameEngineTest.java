@@ -35,8 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameEngineTest {
 
-    /** Regras com poderes: 3 jokers + 3 sabotagens, até 2 cartas jogadas. */
-    private static final GameRules POWERS = new GameRules(300, 8, 5, 3, 3, 3, 2);
+    /** Regras com poderes: 4 jokers + 3 sabotagens, até 2 cartas jogadas. */
+    private static final GameRules POWERS = new GameRules(300, 8, 5, 3, 4, 3, 2);
 
     private GameEngine engine;
     private final ScoringEngine scoring = new ScoringEngine();
@@ -75,7 +75,7 @@ class GameEngineTest {
     }
 
     @Test
-    @DisplayName("após as duas mãos cada jogador recebe uma única mão com 3 jokers e 3 sabotagens")
+    @DisplayName("após as duas mãos cada jogador recebe uma única mão com 4 jokers e 3 sabotagens")
     void fiveCardFlowDealsPowerHands() {
         GameEngine engine = powersEngine();
         engine.start();
@@ -85,23 +85,23 @@ class GameEngineTest {
         assertEquals(0, engine.currentPlayer());
         for (int player : new int[]{1, 2}) {
             List<PowerCard> hand = engine.powerHandOf(player);
-            assertEquals(6, hand.size());
-            assertEquals(6, new HashSet<>(hand).size(), "as cartas da mão não se repetem");
-            assertEquals(3, countKind(hand, PowerKind.JOKER));
+            assertEquals(7, hand.size());
+            assertEquals(7, new HashSet<>(hand).size(), "as cartas da mão não se repetem");
+            assertEquals(4, countKind(hand, PowerKind.JOKER));
             assertEquals(3, countKind(hand, PowerKind.SABOTAGE));
             assertFalse(groupedByKind(hand), "jokers e sabotagens devem estar intercalados");
         }
 
         GameSnapshot forPlayer1 = engine.snapshotFor(1);
-        assertEquals(6, forPlayer1.player(1).powerHand().size());
-        assertEquals(6, forPlayer1.player(1).powerCount());
+        assertEquals(7, forPlayer1.player(1).powerHand().size());
+        assertEquals(7, forPlayer1.player(1).powerCount());
         assertTrue(forPlayer1.player(2).powerHand().isEmpty(),
                 "o oponente não vê a mão de poderes");
-        assertEquals(6, forPlayer1.player(2).powerCount());
+        assertEquals(7, forPlayer1.player(2).powerCount());
 
         GameSnapshot spectator = engine.snapshot();
-        assertEquals(6, spectator.player(1).powerHand().size());
-        assertEquals(6, spectator.player(2).powerHand().size());
+        assertEquals(7, spectator.player(1).powerHand().size());
+        assertEquals(7, spectator.player(2).powerHand().size());
     }
 
     @Test
@@ -132,7 +132,7 @@ class GameEngineTest {
         submitBoth(engine);
         assertCode("INVALID_PLAYER", () -> engine.lockPowers(3, List.of()));
         assertCode("INVALID_POWER", () -> engine.lockPowers(1, List.of(0, 0)));
-        assertCode("INVALID_POWER", () -> engine.lockPowers(1, List.of(6)));
+        assertCode("INVALID_POWER", () -> engine.lockPowers(1, List.of(9)));
         assertCode("INVALID_POWER", () -> engine.lockPowers(1, List.of(-1)));
         assertCode("TOO_MANY_POWERS", () -> engine.lockPowers(1, List.of(0, 1, 2)));
 
@@ -644,5 +644,89 @@ class GameEngineTest {
     private static void assertCode(String code, Runnable action) {
         GameRuleException exception = assertThrows(GameRuleException.class, action::run);
         assertEquals(code, exception.code(), exception.getMessage());
+    }
+
+    @Test
+    @DisplayName("toda mudança visível em qualquer visualizador incrementa a versão do instantâneo")
+    void everyVisibleChangeBumpsTheViewerVersion() {
+        GameEngine engine = new GameEngine("versions", "Ana", "Beto", new Random(11), POWERS,
+                new ScoringEngine());
+        assertBumped(engine, engine::start);
+        List<Card> hand1 = engine.handOf(1).subList(0, 5);
+        assertBumped(engine, () -> engine.submitPlay(1, hand1));
+        List<Card> hand2 = engine.handOf(2).subList(0, 5);
+        assertBumped(engine, () -> engine.submitPlay(2, hand2));
+        // A mesa/pontuação e as mãos de poder ficaram visíveis para os dois lados.
+        long lockedVersion = engine.version();
+        assertBumped(engine, () -> engine.lockPowers(1, List.of()));
+        assertTrue(engine.version() > lockedVersion);
+        assertBumped(engine, () -> engine.lockPowers(2, List.of()));
+        assertTrue(engine.phase() == GamePhase.REVEAL);
+        assertBumped(engine, () -> engine.advance(1));
+        assertBumped(engine, () -> engine.advance(2));
+    }
+
+    private static void assertBumped(GameEngine engine, Runnable action) {
+        GameSnapshot before1 = engine.snapshotFor(GameEngine.PLAYER_ONE);
+        GameSnapshot before2 = engine.snapshotFor(GameEngine.PLAYER_TWO);
+        action.run();
+        GameSnapshot after1 = engine.snapshotFor(GameEngine.PLAYER_ONE);
+        GameSnapshot after2 = engine.snapshotFor(GameEngine.PLAYER_TWO);
+        assertViewerVersionBumped(before1, after1);
+        assertViewerVersionBumped(before2, after2);
+    }
+
+    private static void assertViewerVersionBumped(GameSnapshot before, GameSnapshot after) {
+        GameSnapshot normalizedBefore = withoutVersion(before);
+        GameSnapshot normalizedAfter = withoutVersion(after);
+        if (!normalizedBefore.equals(normalizedAfter)) {
+            assertTrue(after.version() > before.version(),
+                    "o instantâneo visível mudou sem incrementar a versão ("
+                            + before.version() + " -> " + after.version() + ")");
+        }
+    }
+
+    private static GameSnapshot withoutVersion(GameSnapshot snapshot) {
+        return new GameSnapshot(snapshot.sessionId(), 0L, snapshot.phase(), snapshot.round(),
+                snapshot.currentPlayer(), snapshot.rules(), snapshot.globalModifierId(),
+                snapshot.globalModifierName(), snapshot.globalModifierDescription(),
+                snapshot.firstResolver(), snapshot.player1(), snapshot.player2(),
+                snapshot.lastOutcome(), snapshot.winner(), snapshot.log());
+    }
+
+    @Test
+    @DisplayName("índices de poder inválidos deixam o estado intacto e podem ser corrigidos")
+    void invalidPowerIndicesLeaveTheStateUntouched() {
+        GameEngine engine = new GameEngine("powers", "Ana", "Beto", new Random(3), POWERS,
+                new ScoringEngine());
+        engine.start();
+        engine.submitPlay(1, engine.handOf(1).subList(0, 5));
+        engine.submitPlay(2, engine.handOf(2).subList(0, 5));
+        assertEquals(GamePhase.SABOTAGE, engine.phase());
+
+        GameSnapshot before = engine.snapshot();
+        assertCode("INVALID_POWER", () -> engine.lockPowers(1, List.of(99)));
+        assertEquals(before, engine.snapshot(), "a recusa não pode alterar nada");
+        assertCode("INVALID_POWER", () -> engine.lockPowers(1, List.of(0, 0)));
+        assertEquals(before, engine.snapshot(), "índices repetidos não podem alterar nada");
+
+        engine.lockPowers(1, List.of(0));
+        assertTrue(engine.snapshotFor(1).player(1).powersLocked());
+    }
+
+    @Test
+    @DisplayName("seleção inválida de cartas não altera a mão nem a versão")
+    void invalidPlayLeavesTheStateUntouched() {
+        GameEngine engine = new GameEngine("plays", "Ana", "Beto", new Random(4), POWERS,
+                new ScoringEngine());
+        engine.start();
+        GameSnapshot before = engine.snapshot();
+        assertCode("INVALID_SELECTION", () -> engine.submitPlay(1, List.of()));
+        assertEquals(before, engine.snapshot());
+        Card notInHand = engine.handOf(2).get(0);
+        assertCode("CARD_NOT_IN_HAND", () -> engine.submitPlay(1,
+                List.of(notInHand, engine.handOf(1).get(0), engine.handOf(1).get(1),
+                        engine.handOf(1).get(2), engine.handOf(1).get(3))));
+        assertEquals(before, engine.snapshot());
     }
 }

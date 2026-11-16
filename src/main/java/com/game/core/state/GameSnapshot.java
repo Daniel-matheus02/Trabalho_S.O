@@ -27,7 +27,7 @@ public record GameSnapshot(
         List<LogEntry> log
 ) {
     public GameSnapshot {
-        log = List.copyOf(log);
+        log = log == null ? List.of() : List.copyOf(log);
     }
 
     public PlayerView player(int id) {

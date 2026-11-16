@@ -29,11 +29,21 @@ public final class ServerHandler extends SimpleChannelInboundHandler<String> {
     protected void channelRead0(ChannelHandlerContext ctx, String message) {
         try {
             Envelope envelope = codec.decode(message);
+            com.game.diagnostics.CrashLog.protocol("IN", envelope.type(),
+                    message.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                    envelope.messageId());
             sessions.handleMessage(ctx.channel(), envelope);
         } catch (ProtocolException e) {
             ctx.channel().writeAndFlush(codec.encode(codec.message(MessageType.ERROR, null, 0,
                     new ErrorPayload("BAD_MESSAGE", e.getMessage()))));
             LOG.warning("Mensagem inválida de " + ctx.channel().remoteAddress() + ": " + e.getMessage());
+        } catch (RuntimeException e) {
+            // Erros de regra/payload são respondidos sem derrubar a conexão. O canal só é
+            // fechado por abuso de protocolo (quadros acima do limite, tratados pelo decoder).
+            LOG.log(java.util.logging.Level.WARNING,
+                    "Erro inesperado de " + ctx.channel().remoteAddress(), e);
+            ctx.channel().writeAndFlush(codec.encode(codec.message(MessageType.ERROR, null, 0,
+                    new ErrorPayload("SERVER_ERROR", "Erro inesperado ao processar a mensagem"))));
         }
     }
 

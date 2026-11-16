@@ -2,7 +2,7 @@
 
 Um duelo de cartas 1v1 inspirado no Balatro, feito como jogo desktop nativo em Java 21
 com libGDX, LWJGL3, Netty e Jackson. As regras evoluíram do protótipo `Duelo de Fichas.html`
-até a v0.13, com mão de 5 entre 8 cartas, uma mão de 6 poderes misturados por rodada, contagem
+até a v0.13, com mão de 5 entre 8 cartas, uma mão de 7 poderes misturados por rodada, contagem
 animada estilo Balatro e um modificador global compartilhado.
 O jogo inclui uma mesa polida, IA para um jogador, multiplayer em LAN e um servidor
 autoritativo autônomo. O modo de um jogador não precisa de navegador, servidor nem conexão
@@ -189,7 +189,7 @@ Empates não causam dano. O jogador que chegar a 0 de vida perde.
 ### Poderes por rodada
 
 Não há economia, loja, moedas nem rerolls. Depois que os dois jogadores enviam as 5 cartas,
-cada um recebe **uma única mão de 6 cartas**: 3 jokers e 3 sabotagens embaralhados juntos, nunca
+cada um recebe **uma única mão de 7 cartas**: 4 jokers e 3 sabotagens embaralhados juntos, nunca
 agrupados por tipo, apenas para aquela rodada. Cada jogador pode jogar **até 2 cartas dessa mão**,
 em qualquer combinação: 2 jokers, 2 sabotagens ou 1 de cada (0 ou 1 também vale). As cartas
 jogadas aplicam-se na ordem do índice da mão; o que não for jogado é descartado ao fim da rodada.
@@ -240,7 +240,7 @@ a face. A sequência A-2-3-4-5 conta como sequência.
 | Mão Fraca | mult ×2 se a mão for Carta Alta ou Par |
 | Ouro Corrido | +10 fichas por ♦ jogado |
 
-### Jokers (3 na mão de 6 poderes, até 2 poderes jogados)
+### Jokers (4 na mão de 7 poderes, até 2 poderes jogados)
 
 Os efeitos abaixo são avaliados sobre as **5 cartas jogadas** e valem apenas para a rodada em
 que o joker é jogado.
@@ -262,7 +262,7 @@ que o joker é jogado.
 1. Os dois jogadores recebem **8 cartas**.
 2. O jogador 1 escolhe e envia **5 cartas**.
 3. O jogador 2 escolhe e envia **5 cartas** (as cartas do adversário permanecem ocultas).
-4. Cada jogador recebe **6 poderes embaralhados** (3 jokers + 3 sabotagens), escolhe até 2
+4. Cada jogador recebe **7 poderes embaralhados** (4 jokers + 3 sabotagens), escolhe até 2
    cartas em qualquer combinação e trava os poderes. O que não for jogado é descartado.
 5. As sabotagens resolvem em ordem alternada; a pontuação é calculada sobre as 5 cartas jogadas
    e o dano é aplicado.
@@ -280,7 +280,7 @@ uma caixa vermelha de **MULT** = **PONTOS**. A contagem é dirigida pelos `Score
    pulsa, solta um popup azul de `+N` e as fichas rolam até o novo total.
 3. No fim, `fichas × mult` sobe até a pontuação final, partículas voam para o placar e a tela
    treme em uma de três intensidades proporcionais à pontuação.
-4. Só então a mão de 3 cartas restantes troca pelos 6 poderes. O jogador escolhe e confirma.
+4. Só então a mão de 3 cartas restantes troca pelos 7 poderes. O jogador escolhe e confirma.
 5. Na revelação, a mesma contagem roda sobre o resultado final, incluindo beats dos jokers e das
    sabotagens jogadas; o dano só aparece depois do fim da contagem.
 
@@ -412,7 +412,7 @@ Tipos de mensagem: `CREATE_SESSION`, `SESSION_CREATED`, `JOIN_SESSION`, `JOIN_AC
 
 1. Inicie uma partida local e confira as 8 cartas, a seleção de 5, o pouso na mesa e a prévia.
 2. Envie as duas jogadas e confira a contagem da mesa: fichas azuis, mult vermelho e pontos.
-3. Aguarde a queima: as 3 cartas restantes giram/queimam e os 6 poderes entram misturados.
+3. Aguarde a queima: as 3 cartas restantes giram/queimam e os 7 poderes entram misturados.
 4. Selecione 2 poderes; o terceiro clique deve ser recusado com tremor e o botão mostrar `(2/2)`.
 5. Passe o mouse nos poderes da mão, dos slots e do oponente; confira tooltip, cores e pop-in.
 6. Confirme os poderes e confira os voos, os popups, o descarte e o rótulo `SEM PODER`.
@@ -501,7 +501,7 @@ java -Dduelo.dev=true -jar build/libs/duelo-de-fichas-1.0.0.jar --screen=table
 ./gradlew test
 ```
 
-A suíte contém atualmente 107 testes. A cobertura inclui:
+A suíte contém atualmente 111 testes. A cobertura inclui:
 
 - categorias de mão, a sequência A-5, valores das fichas e arredondamento do multiplicador
 - todos os curingas e modificadores globais, incluindo a ordem de empilhamento

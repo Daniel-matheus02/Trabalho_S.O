@@ -162,7 +162,11 @@ public final class GameClient implements AutoCloseable {
         if (ch == null || !ch.isActive()) {
             return;
         }
-        ch.writeAndFlush(codec.encode(envelope)).addListener(future -> {
+        String json = codec.encode(envelope);
+        com.game.diagnostics.CrashLog.protocol("OUT", envelope.type(),
+                json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                envelope.messageId());
+        ch.writeAndFlush(json).addListener(future -> {
             if (!future.isSuccess()) {
                 LOG.warning("Falha ao enviar " + envelope.type() + ": " + future.cause());
             }
@@ -183,6 +187,19 @@ public final class GameClient implements AutoCloseable {
 
     public SessionInfoPayload sessionInfo() {
         return sessionInfo;
+    }
+
+    /**
+     * QA: derruba o canal TCP sem encerrar o cliente, exercitando o caminho real de perda de
+     * conexão &rarr; {@link ClientEvent.ConnectionLost} &rarr; reconexão com token. Não é usado
+     * pelo jogo; existe para o teste de rede simular uma queda de LAN no meio da rodada.
+     */
+    public void dropConnectionForTest() {
+        Channel ch = channel;
+        channel = null;
+        if (ch != null) {
+            ch.close();
+        }
     }
 
     public GameSnapshot latestSnapshot() {
@@ -250,6 +267,12 @@ public final class GameClient implements AutoCloseable {
             }
         } catch (ProtocolException e) {
             emit(new ClientEvent.ErrorReceived("BAD_MESSAGE", e.getMessage()));
+        } catch (RuntimeException e) {
+            // Um payload inesperado não pode derrubar a conexão: registra e segue vivo.
+            LOG.log(java.util.logging.Level.WARNING,
+                    "Erro inesperado ao processar a mensagem " + envelope.type(), e);
+            emit(new ClientEvent.ErrorReceived("BAD_MESSAGE",
+                    "Erro ao processar " + envelope.type() + ": " + e.getMessage()));
         }
     }
 

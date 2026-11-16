@@ -171,7 +171,7 @@ public final class ResolutionEffect extends Actor {
             return new Source(card, position.x, position.y, actor.getWidth(), actor.getHeight());
         }
         float width = Math.max(96f, stage.getWidth() * 0.09f);
-        float height = width * 1.38f;
+        float height = width * com.game.client.layout.LayoutMetrics.CARD_ASPECT;
         float x = own ? stage.getWidth() * 0.34f : stage.getWidth() * 0.56f;
         float y = stage.getHeight() * 0.22f;
         return new Source(card, x, y, width, height);
@@ -235,7 +235,7 @@ public final class ResolutionEffect extends Actor {
     private Source fallback(PowerEvent event) {
         PowerCard card = new PowerCard(event.kind(), event.id());
         float width = Math.max(96f, stage.getWidth() * 0.09f);
-        float height = width * 1.38f;
+        float height = width * com.game.client.layout.LayoutMetrics.CARD_ASPECT;
         float x = stage.getWidth() * (event.player() == myId ? 0.34f : 0.56f);
         float y = stage.getHeight() * 0.22f;
         return new Source(card, x, y, width, height);

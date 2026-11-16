@@ -1,8 +1,11 @@
 package com.game.rendering;
 
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
+import com.badlogic.gdx.scenes.scene2d.actions.TemporalAction;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.game.assets.GameAssets;
@@ -31,6 +34,8 @@ public abstract class HandCardActor extends Actor {
     protected boolean hovered;
     protected float hoverLocalX;
     protected float lift;
+    /** Deslocamento vertical temporário da subida da nevoa (nunca muda a posicao do leiaute). */
+    protected float dealRise;
     protected float appear = 0.25f;
     protected float glowPulse;
     protected float reveal = 1f;
@@ -54,6 +59,8 @@ public abstract class HandCardActor extends Actor {
                 if (isHoverable()) {
                     hovered = true;
                     hoverLocalX = x;
+                    // No leque, a carta sob o cursor precisa ficar visível por inteiro.
+                    toFront();
                     if (hoverListener != null) {
                         hoverListener.onHoverEnter(HandCardActor.this);
                     }
@@ -154,6 +161,32 @@ public abstract class HandCardActor extends Actor {
         dealMotion = false;
     }
 
+    /**
+     * Emerge de baixo: a carta começa {@code rise} pixels abaixo do lugar final e sobe até ele.
+     * O deslocamento é aplicado no desenho, então o leiaute nunca briga com a animação.
+     */
+    public void startRise(float delay, float duration) {
+        dealRise = RISE_PIXELS;
+        addAction(Actions.sequence(Actions.delay(Math.max(0f, delay)),
+                new RiseAction(Math.max(0.01f, duration))));
+    }
+
+    /** Pixels que a carta percorre ao emergir da nevoa. */
+    public static final float RISE_PIXELS = 40f;
+
+    private final class RiseAction extends TemporalAction {
+
+        RiseAction(float duration) {
+            setDuration(duration);
+            setInterpolation(Interpolation.swingOut);
+        }
+
+        @Override
+        protected void update(float percent) {
+            dealRise = RISE_PIXELS * (1f - percent);
+        }
+    }
+
     /** Mostra a carta sem animação de distribuição. */
     public void showInstantly() {
         reveal = 1f;
@@ -161,6 +194,7 @@ public abstract class HandCardActor extends Actor {
         revealing = false;
         dealMotion = false;
         sparkled = true;
+        appear = 1f;
     }
 
     @Override

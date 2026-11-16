@@ -104,11 +104,11 @@ class ServerIntegrationTest {
 
         GameSnapshot anaPowers = await(ana, s -> s.phase() == GamePhase.SABOTAGE, 5_000);
         GameSnapshot betoPowers = await(beto, s -> s.phase() == GamePhase.SABOTAGE, 5_000);
-        assertEquals(6, anaPowers.player(1).powerHand().size());
+        assertEquals(7, anaPowers.player(1).powerHand().size());
         assertTrue(anaPowers.player(2).powerHand().isEmpty(),
                 "os poderes do oponente continuam ocultos");
-        assertEquals(6, anaPowers.player(2).powerCount());
-        assertEquals(6, betoPowers.player(2).powerHand().size());
+        assertEquals(7, anaPowers.player(2).powerCount());
+        assertEquals(7, betoPowers.player(2).powerHand().size());
         assertTrue(betoPowers.player(1).powerHand().isEmpty());
 
         ana.sendAction(ActionPayload.lockPowers(List.of(0, 1)));

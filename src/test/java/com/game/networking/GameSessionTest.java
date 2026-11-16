@@ -95,6 +95,39 @@ class GameSessionTest {
     }
 
     @Test
+    void aRejectedActionIsNotRememberedAndTheSameMessageIdCanBeRetried() {
+        EmbeddedChannel ch1 = new EmbeddedChannel();
+        EmbeddedChannel ch2 = new EmbeddedChannel();
+        GameSession session = startedSession(ch1, ch2);
+        drain(ch1);
+        GameSnapshot state = snapshotFrom(drain(ch2));
+
+        // Jogador 2 tenta agir fora do turno: a mensagem é recusada.
+        Card card = state.player(2).hand().get(0);
+        ActionPayload rejected = ActionPayload.play(List.of(card.code()));
+        Envelope rejectedEnvelope = new Envelope(MessageType.PLAYER_ACTION, "rejected-message",
+                session.sessionId(), 2, System.currentTimeMillis(),
+                codec.mapper().valueToTree(rejected));
+        session.handleAction(2, rejectedEnvelope, rejected);
+        assertTrue(drain(ch2).stream().anyMatch(e -> e.type() == MessageType.ERROR));
+
+        // O jogador 1 reaproveita o mesmo id de mensagem numa ação válida: ela precisa ser
+        // aplicada, porque a recusa anterior não deve marcar o comando como processado.
+        List<String> codes = session.snapshotFor(1).player(1).hand().subList(0, 5).stream()
+                .map(Card::code).toList();
+        ActionPayload accepted = ActionPayload.play(codes);
+        Envelope acceptedEnvelope = new Envelope(MessageType.PLAYER_ACTION, "rejected-message",
+                session.sessionId(), 1, System.currentTimeMillis(),
+                codec.mapper().valueToTree(accepted));
+        session.handleAction(1, acceptedEnvelope, accepted);
+
+        GameSnapshot after = snapshotFrom(drain(ch1));
+        assertEquals(2, after.currentPlayer(), "a ação válida com o id recusado deve ser aplicada");
+        assertEquals(state.version() + 1, after.version(),
+                "apenas a ação válida deve ter avançado o estado");
+    }
+
+    @Test
     void duplicateCommandsAreIgnored() {
         EmbeddedChannel ch1 = new EmbeddedChannel();
         EmbeddedChannel ch2 = new EmbeddedChannel();
@@ -139,6 +172,45 @@ class GameSessionTest {
         ErrorPayload payload = codec.payload(error, ErrorPayload.class);
         assertEquals("NOT_YOUR_TURN", payload.code());
         assertEquals(GamePhase.BUILD, state.phase());
+    }
+
+    @Test
+    void aLateLockAfterTheRoundResolvedIsANoOpAndNotAnError() {
+        EmbeddedChannel ch1 = new EmbeddedChannel();
+        EmbeddedChannel ch2 = new EmbeddedChannel();
+        GameSession session = startedSession(ch1, ch2);
+        drain(ch1);
+        drain(ch2);
+
+        // Os dois jogadores enviam as cinco cartas; a rodada entra em SABOTAGE.
+        List<String> one = session.snapshotFor(1).player(1).hand().subList(0, 5).stream()
+                .map(Card::code).toList();
+        List<String> two = session.snapshotFor(2).player(2).hand().subList(0, 5).stream()
+                .map(Card::code).toList();
+        session.handleAction(1, codec.message(MessageType.PLAYER_ACTION, session.sessionId(), 1,
+                ActionPayload.play(one)), ActionPayload.play(one));
+        session.handleAction(2, codec.message(MessageType.PLAYER_ACTION, session.sessionId(), 2,
+                ActionPayload.play(two)), ActionPayload.play(two));
+        assertEquals(GamePhase.SABOTAGE, session.snapshotFor(1).phase());
+
+        ActionPayload lock = ActionPayload.lockPowers(List.of(0));
+        session.handleAction(1, codec.message(MessageType.PLAYER_ACTION, session.sessionId(), 1,
+                lock), lock);
+        session.handleAction(2, codec.message(MessageType.PLAYER_ACTION, session.sessionId(), 2,
+                lock), lock);
+        assertEquals(GamePhase.REVEAL, session.snapshotFor(1).phase());
+        drain(ch1);
+
+        // Comando atrasado: chegou depois de a rodada já ter resolvido. Deve devolver o estado,
+        // nunca um ERROR que apareceria como falha para o jogador.
+        session.handleAction(1, codec.message(MessageType.PLAYER_ACTION, session.sessionId(), 1,
+                lock), lock);
+
+        List<Envelope> messages = drain(ch1);
+        assertTrue(messages.stream().anyMatch(e -> e.type() == MessageType.GAME_STATE_UPDATE),
+                "o comando atrasado deve devolver o estado atual");
+        assertTrue(messages.stream().noneMatch(e -> e.type() == MessageType.ERROR),
+                "a corrida de poderes atrasados não pode virar erro de protocolo");
     }
 
     @Test

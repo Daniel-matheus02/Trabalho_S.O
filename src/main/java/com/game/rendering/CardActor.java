@@ -7,6 +7,7 @@ import com.badlogic.gdx.graphics.g2d.NinePatch;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.game.assets.GameAssets;
+import com.game.client.layout.LayoutMetrics;
 import com.game.core.model.Card;
 
 /**
@@ -30,6 +31,11 @@ public final class CardActor extends HandCardActor {
         return card;
     }
 
+    /** QA: o ator está desenhando o verso (sem identidade)? */
+    public boolean isFaceDown() {
+        return faceDown;
+    }
+
     @Override
     public void draw(Batch batch, float parentAlpha) {
         float w = getWidth();
@@ -48,7 +54,7 @@ public final class CardActor extends HandCardActor {
         flip *= Math.abs(getScaleX());
         float hop = dealMotion && reveal < 1f ? MathUtils.sin(reveal * MathUtils.PI) * 6f : 0f;
         float drop = dealMotion && reveal < 1f ? (1f - reveal) * 26f : 0f;
-        float y = getY() + lift + hop - drop;
+        float y = getY() + lift + hop - drop - dealRise;
         float centerX = getX() + w / 2f;
         float centerY = y + h / 2f;
 
@@ -120,7 +126,7 @@ public final class CardActor extends HandCardActor {
     public static CardActor decorative(GameAssets assets, Card card, boolean faceDown, float width) {
         CardActor actor = new CardActor(assets, card, faceDown, null);
         actor.setInteractive(false);
-        actor.setSize(width, width * 1.38f);
+        actor.setSize(width, width * LayoutMetrics.CARD_ASPECT);
         return actor;
     }
 }

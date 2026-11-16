@@ -24,7 +24,7 @@ public record GameRules(
             8,   // cartas na mão por rodada
             5,   // cartas escolhidas por jogador
             3,   // divisor do dano
-            3,   // jokers recebidos por rodada
+            4,   // jokers recebidos por rodada
             3,   // sabotagens recebidas por rodada
             2    // poderes que podem ser jogados por rodada
     );

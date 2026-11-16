@@ -28,9 +28,11 @@ public record PlayerView(
         boolean ready
 ) {
     public PlayerView {
-        hand = List.copyOf(hand);
-        playedCards = List.copyOf(playedCards);
-        powerHand = List.copyOf(powerHand);
-        playedPowers = List.copyOf(playedPowers);
+        // Um campo nulo vindo de um instantâneo filtrado (ou de um JSON sem a lista) não pode
+        // explodir na apresentação: listas ausentes viram listas vazias.
+        hand = hand == null ? List.of() : List.copyOf(hand);
+        playedCards = playedCards == null ? List.of() : List.copyOf(playedCards);
+        powerHand = powerHand == null ? List.of() : List.copyOf(powerHand);
+        playedPowers = playedPowers == null ? List.of() : List.copyOf(playedPowers);
     }
 }

@@ -54,6 +54,12 @@ public final class DuelGame extends Game {
                 case "layout" -> LayoutProbe.run(this);
                 case "screenshots" -> ScreenshotProbe.run(this);
                 case "frames" -> ScreenshotProbe.runFrames(this);
+                case "joker-pixel-match" -> ScreenshotProbe.runJokerPixelMatch(this);
+                case "netplay-ui" -> {
+                    if (com.game.qa.NetplayUiProbe.run(this) != 0) {
+                        throw new IllegalStateException("netplay-ui falhou");
+                    }
+                }
                 default -> System.out.println("[Probe] desconhecido: " + options.probe());
             }
             Gdx.app.exit();
