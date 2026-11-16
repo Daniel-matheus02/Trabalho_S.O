@@ -211,22 +211,32 @@ public final class MultiplayerMenuScreen extends BaseScreen {
         if (!handedOff) {
             pollEvents();
         }
+        if (handedOff) {
+            // A partida já assumiu a tela (e a conexão): nada desta tela deve ser desenhado.
+            return;
+        }
         super.render(delta);
     }
 
     private void pollEvents() {
-        if (client == null) {
-            return;
-        }
-        ClientEvent event;
-        while ((event = client.pollEvent()) != null) {
+        while (!handedOff) {
+            // A conexão é relida a cada volta: os tratadores abaixo podem entregá-la à partida
+            // (openGame) ou fechá-la em caso de erro.
+            GameClient connection = client;
+            if (connection == null) {
+                return;
+            }
+            ClientEvent event = connection.pollEvent();
+            if (event == null) {
+                return;
+            }
             switch (event) {
                 case ClientEvent.Connected connected -> {
                     if ("HOST".equals(mode)) {
-                        client.createSession(playerName());
+                        connection.createSession(playerName());
                         setStatus("SALA CRIADA. CONECTANDO COMO HOST...", Palette.INK_DIM);
                     } else if ("JOIN".equals(mode)) {
-                        client.joinSession(pendingCode, playerName(), null);
+                        connection.joinSession(pendingCode, playerName(), null);
                         setStatus("ENTRANDO NA SALA " + pendingCode + "...", Palette.INK_DIM);
                     }
                 }

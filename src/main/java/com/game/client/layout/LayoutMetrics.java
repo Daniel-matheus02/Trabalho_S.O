@@ -10,6 +10,11 @@ public final class LayoutMetrics {
     public static final float CARD_ASPECT = 1.36f;
     public static final float MIN_CARD_HEIGHT = 96f;
     public static final float MAX_POWER_OVERLAP = 0.38f;
+    /**
+     * Fator aplicado SOMENTE ao retângulo da mão (cartas, curingas e sabotagens). A mesa usa a
+     * altura bruta, portanto continua com o mesmo tamanho de antes.
+     */
+    public static final float HAND_CARD_SCALE = 0.88f;
     public static final int POWER_CARDS = 7;
     /** Tabela de mesa: 5 cartas + 2 poderes, com o espaçamento e o placar reservado. */
     private static final float TABLE_ROW_FACTOR = 8.672f;
@@ -150,14 +155,17 @@ public final class LayoutMetrics {
         this.tableCardHeight = Math.max(Math.min(fittedTable, cardHeight),
                 Math.min(cardHeight, MIN_CARD_HEIGHT));
         this.tableCardWidth = tableCardHeight / CARD_ASPECT;
-        this.cards = new CardMetrics(cardWidth, cardHeight, tableCardWidth, tableCardHeight);
+        float handCardHeight = cardHeight * HAND_CARD_SCALE;
+        float handCardWidth = handCardHeight / CARD_ASPECT;
+        this.cards = new CardMetrics(handCardWidth, handCardHeight,
+                tableCardWidth, tableCardHeight);
 
         float handWidth = Math.max(1f, leftWidth - 12f);
-        float step = POWER_CARDS <= 1 ? cardWidth
-                : Math.min(cardWidth, (handWidth - cardWidth) / (POWER_CARDS - 1));
-        step = Math.max(cardWidth * (1f - MAX_POWER_OVERLAP), step);
+        float step = POWER_CARDS <= 1 ? handCardWidth
+                : Math.min(handCardWidth, (handWidth - handCardWidth) / (POWER_CARDS - 1));
+        step = Math.max(handCardWidth * (1f - MAX_POWER_OVERLAP), step);
         this.powerStep = Math.max(1f, step);
-        this.powerOverlap = Math.max(0f, 1f - powerStep / Math.max(1f, cardWidth));
+        this.powerOverlap = Math.max(0f, 1f - powerStep / Math.max(1f, handCardWidth));
 
         this.chipsCellWidth = glyphWidth * 4f + 20f;
         this.multCellWidth = glyphWidth * 2f + 20f;

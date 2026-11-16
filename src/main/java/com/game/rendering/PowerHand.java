@@ -217,13 +217,14 @@ public final class PowerHand extends WidgetGroup {
 
     /** Restaura as cartas da mão após uma apresentação de resolução/replay. */
     public void resetVisuals() {
-        for (PowerCardActor actor : actors) {
+        for (int i = 0; i < actors.size(); i++) {
+            PowerCardActor actor = actors.get(i);
             actor.clearActions();
             actor.setVisible(true);
             actor.setScale(1f, 1f);
-            actor.setRotation(0f);
             actor.getColor().a = 1f;
             actor.showInstantly();
+            actor.setFanAngle(HandCardActor.fanAngleAt(i, actors.size()));
         }
     }
 
@@ -264,5 +265,8 @@ public final class PowerHand extends WidgetGroup {
     @Override
     public void layout() {
         CardRowLayout.layout(this, actors, cardMetrics);
+        for (int i = 0; i < actors.size(); i++) {
+            actors.get(i).setFanAngle(HandCardActor.fanAngleAt(i, actors.size()));
+        }
     }
 }

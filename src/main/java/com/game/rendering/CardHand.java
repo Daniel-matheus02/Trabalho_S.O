@@ -1,5 +1,6 @@
 package com.game.rendering;
 
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.game.assets.GameAssets;
 import com.game.client.layout.LayoutMetrics;
@@ -14,6 +15,11 @@ import java.util.function.IntConsumer;
 
 /** Posiciona as cartas do jogador, anima a distribuição e repassa os cliques nas cartas. */
 public final class CardHand extends WidgetGroup {
+
+    /** A mão do jogador fica claramente aberta; só sobrepõe quando não houver espaço. */
+    private static final float HAND_OVERLAP = 0.12f;
+    /** Quanto as pontas do leque sobem, para o arco parecer natural. */
+    private static final float ARC_LIFT = 7f;
 
     private final GameAssets assets;
     private final List<CardActor> actors = new ArrayList<>();
@@ -137,6 +143,37 @@ public final class CardHand extends WidgetGroup {
 
     @Override
     public void layout() {
-        CardRowLayout.layout(this, actors, cardMetrics);
+        int count = actors.size();
+        if (count == 0) {
+            return;
+        }
+        float cardWidth = cardMetrics.handCardWidth();
+        float cardHeight = cardMetrics.handCardHeight();
+        float maxTilt = HandCardActor.maxFanTilt(count);
+        // Como as cartas giram em torno do centro, as pontas do leque ocupam mais largura do que
+        // o retângulo reto: reserva essa margem para nada encostar na borda da mão.
+        float edgePadding = rotationEdgePadding(cardWidth, cardHeight, maxTilt);
+        CardRowLayout.layout(this, actors, cardWidth, cardHeight, HAND_OVERLAP, edgePadding);
+
+        float center = (count - 1) / 2f;
+        for (int i = 0; i < count; i++) {
+            CardActor actor = actors.get(i);
+            float offset = i - center;
+            float normalized = count <= 1 ? 0f : Math.abs(offset) / center;
+            actor.setY(actor.getY() + ARC_LIFT * normalized * normalized);
+            actor.setFanAngle(HandCardActor.fanAngleAt(i, count));
+        }
+    }
+
+    /** Metade do excesso horizontal causado pela rotação da carta da ponta. */
+    private static float rotationEdgePadding(float cardWidth, float cardHeight,
+                                             float maxTiltDegrees) {
+        if (cardWidth <= 0f || cardHeight <= 0f || maxTiltDegrees <= 0f) {
+            return 0f;
+        }
+        float radians = maxTiltDegrees * MathUtils.degreesToRadians;
+        float rotatedWidth = cardWidth * MathUtils.cos(radians)
+                + cardHeight * MathUtils.sin(radians);
+        return Math.max(0f, (rotatedWidth - cardWidth) / 2f);
     }
 }

@@ -126,13 +126,15 @@ public final class PowerCardActor extends HandCardActor {
         float y = getY() + lift + hop - drop - dealRise;
         float centerX = x + w / 2f;
         float centerY = y + h / 2f;
+        float rotation = getRotation();
         boolean transformed = Math.abs(hoverScale - 1f) > 0.001f
-                || Math.abs(hoverTilt) > 0.001f;
+                || Math.abs(hoverTilt) > 0.001f
+                || rotation != 0f;
         if (transformed) {
             storedTransform.set(batch.getTransformMatrix());
             hoverTransform.set(storedTransform);
             hoverTransform.translate(centerX, centerY, 0f);
-            hoverTransform.rotate(0f, 0f, 1f, hoverTilt);
+            hoverTransform.rotate(0f, 0f, 1f, rotation + hoverTilt);
             hoverTransform.scale(hoverScale, hoverScale, 1f);
             hoverTransform.translate(-centerX, -centerY, 0f);
             batch.setTransformMatrix(hoverTransform);

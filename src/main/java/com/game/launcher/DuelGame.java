@@ -60,6 +60,11 @@ public final class DuelGame extends Game {
                         throw new IllegalStateException("netplay-ui falhou");
                     }
                 }
+                case "lan-handoff" -> {
+                    if (com.game.qa.LanHandoffProbe.run(this) != 0) {
+                        throw new IllegalStateException("lan-handoff falhou");
+                    }
+                }
                 default -> System.out.println("[Probe] desconhecido: " + options.probe());
             }
             Gdx.app.exit();
@@ -110,11 +115,34 @@ public final class DuelGame extends Game {
         switchTo(new GameOverScreen(this, session, cleanup));
     }
 
+    /**
+     * Troca a tela corrente. Quando a troca parte do próprio {@code render()} da tela anterior
+     * (hand-off depois de conectar na LAN, fim de partida, Escape), descartá-la na hora deixaria o
+     * restante daquele quadro desenhando um {@link com.badlogic.gdx.scenes.scene2d.Stage} já
+     * liberado. Nesse caso o descarte fica para o fim do quadro.
+     */
     private void switchTo(Screen next) {
         Screen previous = getScreen();
         setScreen(next);
-        if (previous != null) {
+        if (previous == null) {
+            return;
+        }
+        if (previous == renderingScreen) {
+            Screen stale = pendingDispose;
+            pendingDispose = previous;
+            if (stale != null) {
+                stale.dispose();
+            }
+        } else {
             previous.dispose();
+        }
+    }
+
+    private void disposePendingScreen() {
+        Screen stale = pendingDispose;
+        pendingDispose = null;
+        if (stale != null && stale != getScreen()) {
+            stale.dispose();
         }
     }
 
@@ -190,9 +218,21 @@ public final class DuelGame extends Game {
         }
     }
 
+    /** Tela cujo {@code render()} está em execução agora; ver {@link #switchTo(Screen)}. */
+    private Screen renderingScreen;
+    /** Tela trocada durante o próprio quadro: descartada só no fim dele. */
+    private Screen pendingDispose;
+
     @Override
     public void render() {
-        super.render();
+        Screen current = getScreen();
+        renderingScreen = current;
+        try {
+            super.render();
+        } finally {
+            renderingScreen = null;
+            disposePendingScreen();
+        }
         frames++;
         if (options.screenshotPath() != null && !captured && frames >= 75) {
             captureScreenshot(options.screenshotPath());

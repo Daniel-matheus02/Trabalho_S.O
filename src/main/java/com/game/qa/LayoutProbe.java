@@ -146,7 +146,8 @@ public final class LayoutProbe {
         if (metrics.actionBar.y() < 1f) {
             problems.add("barra de ações na borda inferior (y=" + Math.round(metrics.actionBar.y()) + ")");
         }
-        if (metrics.cards.handCardHeight() < LayoutMetrics.MIN_CARD_HEIGHT - 0.5f
+        if (metrics.cards.handCardHeight()
+                < LayoutMetrics.MIN_CARD_HEIGHT * LayoutMetrics.HAND_CARD_SCALE - 0.5f
                 || metrics.cards.tableCardHeight() < LayoutMetrics.MIN_CARD_HEIGHT - 0.5f) {
             problems.add("carta abaixo do mínimo (" + Math.round(metrics.cards.handCardHeight())
                     + "/" + Math.round(metrics.cards.tableCardHeight()) + ")");

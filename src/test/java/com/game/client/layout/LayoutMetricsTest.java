@@ -60,7 +60,8 @@ class LayoutMetricsTest {
                     "carta da mesa abaixo do mínimo em " + size[0] + "x" + size[1]);
             assertTrue(m.powerOverlap <= LayoutMetrics.MAX_POWER_OVERLAP + 1e-4f,
                     "leque de poderes sobrepõe demais em " + size[0] + "x" + size[1]);
-            float powerTotal = m.cardWidth + (LayoutMetrics.POWER_CARDS - 1) * m.powerStep;
+            float powerTotal = m.cards.handCardWidth()
+                    + (LayoutMetrics.POWER_CARDS - 1) * m.powerStep;
             assertTrue(powerTotal <= m.hand.width() - 12f + 0.5f,
                     "7 poderes não cabem na mão em " + size[0] + "x" + size[1]);
         }

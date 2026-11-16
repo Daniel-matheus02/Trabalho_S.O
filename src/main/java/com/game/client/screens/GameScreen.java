@@ -453,6 +453,10 @@ public final class GameScreen extends BaseScreen {
                 goToGameOver();
             }
         }
+        if (keepSessionAlive) {
+            // A tela de fim de partida já assumiu a sessão: este quadro termina aqui.
+            return;
+        }
         super.render(delta);
     }
 

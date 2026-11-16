@@ -38,20 +38,36 @@ class CardMetricsTest {
     }
 
     @Test
-    void tableCardsAreLargeEnoughAndNeverSmallerThanSixtyPercentOfTheHand() {
+    void tableCardsAreLargeEnoughAndNeverSmallerThanSixtyPercentOfTheUnscaledHand() {
         for (float[] size : SIZES) {
             LayoutMetrics m = metricsAt(size[0], size[1]);
             CardMetrics cards = m.cards;
-            assertTrue(cards.tableCardHeight() >= cards.handCardHeight() * 0.60f - 1e-3f,
+            assertTrue(cards.tableCardHeight() >= m.cardHeight * 0.60f - 1e-3f,
                     "carta da mesa abaixo de 60% da mão em " + size[0] + "x" + size[1]
                             + ": mesa=" + cards.tableCardHeight()
-                            + " mão=" + cards.handCardHeight());
-            assertTrue(cards.tableCardHeight() <= cards.handCardHeight() + EPS,
+                            + " mão=" + m.cardHeight);
+            assertTrue(cards.tableCardHeight() <= m.cardHeight + EPS,
                     "carta da mesa maior que a da mão em " + size[0] + "x" + size[1]);
             assertTrue(cards.tableCardHeight() <= (m.table.height() - 8f) / 2f + EPS,
                     "duas fileiras não cabem na mesa em " + size[0] + "x" + size[1]);
-            assertTrue(cards.handCardHeight() >= LayoutMetrics.MIN_CARD_HEIGHT - EPS,
-                    "carta da mão abaixo do mínimo em " + size[0] + "x" + size[1]);
+            assertTrue(cards.handCardHeight() >=
+                            LayoutMetrics.MIN_CARD_HEIGHT * LayoutMetrics.HAND_CARD_SCALE - EPS,
+                    "carta da mão abaixo do mínimo escalado em " + size[0] + "x" + size[1]);
+        }
+    }
+
+    @Test
+    void handCardsAreScaledDownWhileTheTableKeepsTheUnscaledHeight() {
+        for (float[] size : SIZES) {
+            LayoutMetrics m = metricsAt(size[0], size[1]);
+            assertEquals(m.cardHeight * LayoutMetrics.HAND_CARD_SCALE,
+                    m.cards.handCardHeight(), 1e-3f,
+                    "altura da mão escalada em " + size[0] + "x" + size[1]);
+            assertEquals(m.cardHeight * LayoutMetrics.HAND_CARD_SCALE / LayoutMetrics.CARD_ASPECT,
+                    m.cards.handCardWidth(), 1e-3f,
+                    "largura da mão escalada em " + size[0] + "x" + size[1]);
+            assertTrue(m.cards.tableCardHeight() <= m.cardHeight + EPS,
+                    "a mesa não pode usar a altura escalada em " + size[0] + "x" + size[1]);
         }
     }
 
@@ -64,6 +80,29 @@ class CardMetricsTest {
                     size[0] + "x" + size[1] + " (mão)");
             assertRowFits(m.hand.width(), POWER_CARDS, cards.handCardWidth(),
                     size[0] + "x" + size[1] + " (poderes)");
+        }
+    }
+
+    @Test
+    void eightHandCardsFitWithTheOpenFanSpacingAndRotationMargin() {
+        final float maxHandOverlap = 0.12f;
+        for (float[] size : SIZES) {
+            LayoutMetrics m = metricsAt(size[0], size[1]);
+            float cardWidth = m.cards.handCardWidth();
+            float cardHeight = m.cards.handCardHeight();
+            float tilt = Math.min(14f, (HAND_CARDS - 1) / 2f * 2.6f);
+            float radians = tilt * (float) Math.PI / 180f;
+            float rotatedWidth = cardWidth * (float) Math.cos(radians)
+                    + cardHeight * (float) Math.sin(radians);
+            float padding = Math.max(0f, (rotatedWidth - cardWidth) / 2f);
+            float footprint = cardWidth + padding * 2f;
+            float step = Math.min(cardWidth, Math.max(cardWidth * (1f - maxHandOverlap),
+                    (m.hand.width() - footprint) / (HAND_CARDS - 1)));
+            float total = footprint + (HAND_CARDS - 1) * step;
+            assertTrue(total <= m.hand.width() + EPS,
+                    "leque aberto da mão não cabe com a margem de rotação em "
+                            + size[0] + "x" + size[1]
+                            + ": total=" + total + " mão=" + m.hand.width());
         }
     }
 
