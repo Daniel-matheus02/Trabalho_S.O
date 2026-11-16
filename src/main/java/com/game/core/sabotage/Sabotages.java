@@ -18,7 +18,7 @@ public final class Sabotages {
         register("anti_flush", "Panelinha?",
                 "Anula o flush do oponente nesta rodada.");
         register("peso_chumbo", "Quer jogar? vai ter que pagar!",
-                "O oponente perde 5 de mult nesta rodada.");
+                "O oponente perde 2 de mult nesta rodada.");
         register("imposto_par", "Nem meu, nem seu",
                 "O oponente perde 25 fichas se a mão final tiver par ou melhor.");
         register("nevoa", "Sem graça!",

@@ -49,6 +49,15 @@ public final class NetworkMatchSession implements MatchSession {
     }
 
     @Override
+    public void discardCards(List<Card> cards) {
+        List<String> codes = new ArrayList<>(cards.size());
+        for (Card card : cards) {
+            codes.add(card.code());
+        }
+        client.sendAction(ActionPayload.discard(codes));
+    }
+
+    @Override
     public void lockPowers(List<Integer> powerIndices) {
         client.sendAction(ActionPayload.lockPowers(powerIndices));
     }

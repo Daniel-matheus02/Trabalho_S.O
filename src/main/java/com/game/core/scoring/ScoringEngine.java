@@ -12,9 +12,9 @@ import java.util.List;
  * servidor autoritativo. A pontuação final é {@code Math.round(chips * mult)} exatamente como no
  * protótipo.
  *
- * <p>O motor recebe as cartas jogadas e sempre avalia a melhor combinação de cinco antes de
- * aplicar modificadores e curingas. A partida usa exatamente as 5 cartas enviadas por jogador.
- * Cada etapa também produz um {@link ScoreStep} com os totais acumulados.</p>
+ * <p>O motor recebe as cartas jogadas e avalia a melhor combinação de até cinco antes de aplicar
+ * modificadores e curingas. A partida usa de 1 a {@link com.game.core.rules.GameRules#maxPlay()}
+ * cartas por jogador. Cada etapa também produz um {@link ScoreStep} com os totais acumulados.</p>
  */
 public final class ScoringEngine {
 
@@ -100,8 +100,8 @@ public final class ScoringEngine {
                 context.beginStep(StepKind.SABOTAGE, -1, sabotageId,
                         Sabotages.nameOf(sabotageId));
                 if ("peso_chumbo".equals(sabotageId)) {
-                    context.addMult(-5);
-                    context.addMultLine("Peso de Chumbo: -5 mult");
+                    context.addMult(-2);
+                    context.addMultLine("Peso de Chumbo: -2 mult");
                     multPenaltyApplied = true;
                 } else if ("imposto_par".equals(sabotageId)) {
                     if (type.atLeast(HandType.PAIR)) {

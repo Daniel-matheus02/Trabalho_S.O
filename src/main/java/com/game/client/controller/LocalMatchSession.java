@@ -61,6 +61,11 @@ public final class LocalMatchSession implements MatchSession {
     }
 
     @Override
+    public void discardCards(List<Card> cards) {
+        engine.discardCards(GameEngine.PLAYER_ONE, cards);
+    }
+
+    @Override
     public void lockPowers(List<Integer> powerIndices) {
         engine.lockPowers(GameEngine.PLAYER_ONE, powerIndices);
     }
@@ -90,7 +95,7 @@ public final class LocalMatchSession implements MatchSession {
         PlayerView cpu = state.player(GameEngine.PLAYER_TWO);
         String currentSignature = state.phase() + ":" + state.round() + ":"
                 + state.currentPlayer() + ":" + cpu.powersLocked() + ":"
-                + cpu.powerCount();
+                + cpu.powerCount() + ":" + cpu.discardsRemaining();
         if (!currentSignature.equals(signature)) {
             signature = currentSignature;
             timer = state.phase() == GamePhase.REVEAL ? REVEAL_TIME : THINK_TIME;
@@ -101,6 +106,10 @@ public final class LocalMatchSession implements MatchSession {
                 if (state.currentPlayer() == GameEngine.PLAYER_TWO) {
                     timer -= delta;
                     if (timer <= 0) {
+                        List<Card> discards = bot.chooseDiscard(state, GameEngine.PLAYER_TWO);
+                        if (!discards.isEmpty()) {
+                            engine.discardCards(GameEngine.PLAYER_TWO, discards);
+                        }
                         List<Card> hand = engine.handOf(GameEngine.PLAYER_TWO);
                         engine.submitPlay(GameEngine.PLAYER_TWO,
                                 bot.choosePlay(hand, state.globalModifierId()));

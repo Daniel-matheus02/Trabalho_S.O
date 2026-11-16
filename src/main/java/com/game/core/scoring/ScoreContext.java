@@ -89,7 +89,7 @@ public final class ScoreContext {
     }
 
     public void addMult(int amount) {
-        mult = Math.max(0, mult + amount);
+        mult = Math.max(1, mult + amount);
         if (stepOpen) {
             pendingMultDelta += amount;
         }
@@ -97,7 +97,7 @@ public final class ScoreContext {
 
     public void multiplyMult(int factor) {
         int previous = mult;
-        mult = Math.max(0, mult * factor);
+        mult = Math.max(1, mult * factor);
         if (stepOpen) {
             pendingMultDelta += mult - previous;
             pendingMultFactor *= factor;

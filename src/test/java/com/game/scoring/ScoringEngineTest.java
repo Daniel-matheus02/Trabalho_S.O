@@ -107,6 +107,25 @@ class ScoringEngineTest {
     }
 
     @Test
+    @DisplayName("peso_chumbo agora tira 2 de mult e o mult nunca fica abaixo de 1")
+    void pesoChumboNerfAndMultFloor() {
+        ScoreResult pair = scoring.score(cards("AE", "AC"), List.of(), null,
+                ScoreModifiers.NONE.withMultPenalty(2), List.of("peso_chumbo"));
+        assertEquals(32, pair.chips());
+        assertEquals(1, pair.mult(), "2 mult - 2 deve parar no piso de 1");
+        assertEquals(32, pair.finalScore());
+        assertTrue(pair.lines().stream()
+                .anyMatch(line -> line.text().equals("Peso de Chumbo: -2 mult")));
+
+        ScoreResult high = scoring.score(cards("AE"), List.of(), null,
+                ScoreModifiers.NONE.withMultPenalty(2), List.of("peso_chumbo"));
+        assertEquals(1, high.mult());
+        assertEquals(high.chips(), high.finalScore(),
+                "mesmo sabotado, o jogador pontua fichas x 1");
+        assertTrue(high.finalScore() > 0);
+    }
+
+    @Test
     @DisplayName("o modificador global Mão Fraca só dobra Carta Alta e Par")
     void weakHandOnlyBoostsHighCardOrPair() {
         assertEquals(2, scoring.score(cards("AE"), List.of(), "mao_fraca").mult());
@@ -204,9 +223,9 @@ class ScoringEngineTest {
         List<Card> pair = cards("AE", "AC");
 
         ScoreResult heavy = scoring.score(pair, List.of(), null,
-                ScoreModifiers.NONE.withMultPenalty(5));
-        assertEquals(0, heavy.mult());
-        assertEquals(0, heavy.finalScore());
+                ScoreModifiers.NONE.withMultPenalty(2));
+        assertEquals(1, heavy.mult(), "o mult nunca cai abaixo de 1");
+        assertEquals(32, heavy.finalScore());
 
         ScoreResult taxed = scoring.score(pair, List.of(), null,
                 ScoreModifiers.NONE.withPairTax());

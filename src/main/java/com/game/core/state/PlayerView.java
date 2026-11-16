@@ -25,7 +25,8 @@ public record PlayerView(
         int powerCount,
         List<PowerCard> playedPowers,
         boolean powersLocked,
-        boolean ready
+        boolean ready,
+        int discardsRemaining
 ) {
     public PlayerView {
         // Um campo nulo vindo de um instantâneo filtrado (ou de um JSON sem a lista) não pode

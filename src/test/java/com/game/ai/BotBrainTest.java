@@ -54,11 +54,19 @@ class BotBrainTest {
     }
 
     @Test
-    void alwaysChoosesExactlyMaxPlayCards() {
+    void choosesTheBestPlayAmongOneToMaxPlayCards() {
         List<Card> hand = hand("AE", "AC", "KO", "7E", "2C", "9P", "3E", "4O");
         List<Card> play = brain.choosePlay(hand, null);
-        assertEquals(5, play.size());
+        assertTrue(play.size() >= 1 && play.size() <= 5);
         assertTrue(hand.containsAll(play));
+
+        int best = 0;
+        for (int size = 1; size <= 5; size++) {
+            for (List<Card> combo : BotBrain.combinations(hand, size)) {
+                best = Math.max(best, scoring.score(combo, List.of(), null).finalScore());
+            }
+        }
+        assertEquals(best, scoring.score(play, List.of(), null).finalScore());
     }
 
     @Test
@@ -116,10 +124,10 @@ class BotBrainTest {
         List<Card> opponent = hand("KE", "KC");
         PlayerView me = new PlayerView(
                 1, "CPU", 300, 300, 3, List.of(), true, own, null,
-                powerHand, powerHand.size(), List.of(), false, false);
+                powerHand, powerHand.size(), List.of(), false, false, 2);
         PlayerView rival = new PlayerView(
                 2, "Humano", 300, 300, 3, List.of(), true, opponent, null,
-                List.of(), 0, List.of(), false, false);
+                List.of(), 0, List.of(), false, false, 2);
         return new GameSnapshot("bot", 1, GamePhase.SABOTAGE, 1, 0, POWERS,
                 null, "", "", 1, me, rival, null, 0, List.of());
     }

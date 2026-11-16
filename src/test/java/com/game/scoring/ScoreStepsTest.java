@@ -83,7 +83,7 @@ class ScoreStepsTest {
         for (String id : sabotages) {
             switch (id) {
                 case "anti_flush" -> modifiers = modifiers.withBlockFlush();
-                case "peso_chumbo" -> modifiers = modifiers.withMultPenalty(5);
+                case "peso_chumbo" -> modifiers = modifiers.withMultPenalty(2);
                 case "imposto_par" -> modifiers = modifiers.withPairTax();
                 case "nevoa" -> modifiers = modifiers.withNullifyJokers();
                 default -> {

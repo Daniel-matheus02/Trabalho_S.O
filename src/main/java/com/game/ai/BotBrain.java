@@ -10,6 +10,7 @@ import com.game.core.model.Suit;
 import com.game.core.scoring.ScoreModifiers;
 import com.game.core.scoring.ScoreResult;
 import com.game.core.scoring.ScoringEngine;
+import com.game.core.state.GameEngine;
 import com.game.core.state.GameSnapshot;
 import com.game.core.state.PlayerView;
 
@@ -36,7 +37,7 @@ public final class BotBrain {
         this.maxPlay = maxPlay;
     }
 
-    /** Escolhe a melhor jogada legal entre as cartas da mão. */
+    /** Escolhe a melhor jogada legal (de 1 a {@code maxPlay} cartas) entre as cartas da mão. */
     public List<Card> choosePlay(List<Card> hand, String globalModifierId) {
         if (hand == null || hand.isEmpty()) {
             return List.of();
@@ -44,14 +45,40 @@ public final class BotBrain {
         List<Card> best = null;
         ScoreResult bestScore = null;
         int limit = Math.min(maxPlay, hand.size());
-        for (List<Card> combo : HandEvaluator.combinations(hand, limit)) {
-            ScoreResult score = scoringEngine.score(combo, List.of(), globalModifierId);
-            if (bestScore == null || isBetter(score, combo.size(), bestScore, best.size())) {
-                bestScore = score;
-                best = combo;
+        for (int size = 1; size <= limit; size++) {
+            for (List<Card> combo : HandEvaluator.combinations(hand, size)) {
+                ScoreResult score = scoringEngine.score(combo, List.of(), globalModifierId);
+                if (bestScore == null || isBetter(score, combo.size(), bestScore, best.size())) {
+                    bestScore = score;
+                    best = combo;
+                }
             }
         }
         return best == null ? List.of(hand.get(0)) : best;
+    }
+
+    /**
+     * Escolhe cartas para descartar quando o bot está atrás no placar: descarta as cartas que não
+     * fazem parte da melhor jogada atual, até o limite de cartas por descarte. Sem desvantagem,
+     * guarda a mão.
+     */
+    public List<Card> chooseDiscard(GameSnapshot state, int playerId) {
+        if (state == null) {
+            return List.of();
+        }
+        PlayerView me = state.player(playerId);
+        PlayerView opponent = state.opponentOf(playerId);
+        if (me.discardsRemaining() <= 0 || me.hand().isEmpty() || me.hp() >= opponent.hp()) {
+            return List.of();
+        }
+        List<Card> play = choosePlay(me.hand(), state.globalModifierId());
+        List<Card> worst = new ArrayList<>();
+        for (Card card : me.hand()) {
+            if (!play.contains(card) && worst.size() < GameEngine.MAX_DISCARD_CARDS) {
+                worst.add(card);
+            }
+        }
+        return worst;
     }
 
     /**
@@ -135,7 +162,7 @@ public final class BotBrain {
             }
             switch (card.id()) {
                 case "anti_flush" -> modifiers = modifiers.withBlockFlush();
-                case "peso_chumbo" -> modifiers = modifiers.withMultPenalty(5);
+                case "peso_chumbo" -> modifiers = modifiers.withMultPenalty(2);
                 case "imposto_par" -> modifiers = modifiers.withPairTax();
                 case "nevoa" -> modifiers = modifiers.withNullifyJokers();
                 case "virada_naipes" -> opponentFinal = mirrorSuits(opponentFinal);

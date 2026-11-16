@@ -14,6 +14,10 @@ public record ActionPayload(ActionType action, List<String> cards, List<Integer>
         return new ActionPayload(ActionType.SUBMIT_PLAY, cardCodes, List.of());
     }
 
+    public static ActionPayload discard(List<String> cardCodes) {
+        return new ActionPayload(ActionType.DISCARD_CARDS, cardCodes, List.of());
+    }
+
     public static ActionPayload lockPowers(List<Integer> powerIndices) {
         return new ActionPayload(ActionType.LOCK_POWERS, List.of(), powerIndices);
     }

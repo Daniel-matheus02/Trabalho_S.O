@@ -29,7 +29,8 @@ import java.util.Set;
 /**
  * Motor de regras autoritativo de uma partida. Não sabe nada sobre renderização ou rede.
  *
- * <p>Fluxo: iniciar &rarr; distribuir 8 cartas &rarr; cada jogador envia exatamente 5 cartas &rarr;
+ * <p>Fluxo: iniciar &rarr; distribuir 8 cartas &rarr; cada jogador envia de 1 a 5 cartas (podendo
+ * descartar e comprar novamente até 2 vezes por rodada) &rarr;
  * cada jogador recebe uma única mão embaralhada de 4 jokers + 3 sabotagens e escolhe até
  * {@link GameRules#maxPowersPlayed()} cartas dela &rarr; pontuação e dano (poderes na ordem
  * alternada) &rarr; revelação &rarr; próxima rodada. Quando nenhum poder está configurado, a
@@ -42,6 +43,11 @@ public final class GameEngine {
     public static final int PLAYER_ONE = 1;
     public static final int PLAYER_TWO = 2;
     public static final int OBSERVER = 0;
+
+    /** Quantas ações de descarte cada jogador pode usar por rodada. */
+    public static final int MAX_DISCARDS_PER_ROUND = 2;
+    /** Máximo de cartas descartadas em uma única ação. */
+    public static final int MAX_DISCARD_CARDS = 8;
 
     public static final String STYLE_NORMAL = "";
     public static final String STYLE_RESULT = "res";
@@ -64,6 +70,7 @@ public final class GameEngine {
     private final boolean[] ready = new boolean[3];
     private final boolean[] rematch = new boolean[3];
     private final List<Card>[] pendingCards = new List[3];
+    private final int[] discardsUsed = new int[3];
     private final ScoreResult[] tableScores = new ScoreResult[3];
 
     private final List<LogEntry> log = new ArrayList<>();
@@ -103,6 +110,7 @@ public final class GameEngine {
         java.util.Arrays.fill(powerHands, List.of());
         java.util.Arrays.fill(playedPowers, List.of());
         java.util.Arrays.fill(pendingCards, null);
+        java.util.Arrays.fill(discardsUsed, 0);
         java.util.Arrays.fill(tableScores, null);
         java.util.Arrays.fill(powersLocked, false);
         java.util.Arrays.fill(ready, false);
@@ -210,16 +218,16 @@ public final class GameEngine {
         touch();
     }
 
-    /** Envia as cinco cartas que um jogador deseja jogar nesta rodada. */
+    /** Envia as cartas (de 1 a {@link GameRules#maxPlay()}) que um jogador deseja jogar nesta rodada. */
     public synchronized void submitPlay(int player, List<Card> cards) {
         ensurePlayer(player);
         requirePhase(GamePhase.BUILD);
         if (currentPlayer != player) {
             throw new GameRuleException("NOT_YOUR_TURN", "Não é a vez do jogador " + player);
         }
-        if (cards == null || cards.size() != rules.maxPlay()) {
+        if (cards == null || cards.isEmpty() || cards.size() > rules.maxPlay()) {
             throw new GameRuleException("INVALID_SELECTION",
-                    "É preciso escolher exatamente " + rules.maxPlay() + " cartas");
+                    "É preciso escolher de 1 a " + rules.maxPlay() + " cartas");
         }
         for (Card card : cards) {
             if (card == null) {
@@ -254,7 +262,64 @@ public final class GameEngine {
     }
 
     /**
-     * Pontuação de mesa: as cinco cartas enviadas com o modificador global da rodada, sem poderes.
+     * Descarte de cartas da própria mão durante a fase de compra. As cartas saem da mão e são
+     * substituídas imediatamente por cartas novas do baralho, mantendo o tamanho da mão. Cada
+     * jogador pode usar no máximo {@link #MAX_DISCARDS_PER_ROUND} descartes por rodada, com no
+     * máximo {@link #MAX_DISCARD_CARDS} cartas por ação (e no mínimo uma).
+     */
+    public synchronized void discardCards(int player, List<Card> cards) {
+        ensurePlayer(player);
+        requirePhase(GamePhase.BUILD);
+        if (currentPlayer != player) {
+            throw new GameRuleException("NOT_YOUR_TURN", "Não é a vez do jogador " + player);
+        }
+        if (discardsUsed[player] >= MAX_DISCARDS_PER_ROUND) {
+            throw new GameRuleException("NO_DISCARDS_LEFT",
+                    "Você já usou os " + MAX_DISCARDS_PER_ROUND + " descartes desta rodada");
+        }
+        if (cards == null || cards.isEmpty()) {
+            throw new GameRuleException("INVALID_SELECTION",
+                    "Escolha pelo menos 1 carta para descartar");
+        }
+        if (cards.size() > MAX_DISCARD_CARDS) {
+            throw new GameRuleException("TOO_MANY_CARDS",
+                    "Você pode descartar no máximo " + MAX_DISCARD_CARDS + " cartas por vez");
+        }
+        for (Card card : cards) {
+            if (card == null) {
+                throw new GameRuleException("INVALID_SELECTION", "A seleção contém uma carta nula");
+            }
+        }
+        Set<Card> distinct = new HashSet<>(cards);
+        if (distinct.size() != cards.size()) {
+            throw new GameRuleException("INVALID_SELECTION", "Cartas duplicadas na seleção");
+        }
+        if (!hands[player].containsAll(cards)) {
+            throw new GameRuleException("CARD_NOT_IN_HAND",
+                    "As cartas selecionadas não estão na mão do jogador");
+        }
+
+        hands[player].removeAll(cards);
+        List<Card> replacements = new ArrayList<>(cards.size());
+        for (int i = 0; i < cards.size(); i++) {
+            Card replacement = drawCard();
+            replacements.add(replacement);
+            hands[player].add(replacement);
+        }
+        discardsUsed[player]++;
+        log("DISCARD|" + player + "|" + codes(cards), STYLE_SYSTEM);
+        log("REPLACE|" + player + "|" + codes(replacements), STYLE_SYSTEM);
+        touch();
+    }
+
+    /** Descartes ainda disponíveis nesta rodada para o jogador. */
+    public synchronized int discardsRemaining(int player) {
+        ensurePlayer(player);
+        return Math.max(0, MAX_DISCARDS_PER_ROUND - discardsUsed[player]);
+    }
+
+    /**
+     * Pontuação de mesa: as cartas enviadas com o modificador global da rodada, sem poderes.
      * É o valor mostrado ao lado de cada mão assim que as duas são enviadas.
      */
     private void scoreTableHands() {
@@ -495,7 +560,7 @@ public final class GameEngine {
                 ? null : List.copyOf(pendingCards[opponent]);
         switch (id) {
             case "anti_flush" -> modifiers[opponent] = modifiers[opponent].withBlockFlush();
-            case "peso_chumbo" -> modifiers[opponent] = modifiers[opponent].withMultPenalty(5);
+            case "peso_chumbo" -> modifiers[opponent] = modifiers[opponent].withMultPenalty(2);
             case "imposto_par" -> modifiers[opponent] = modifiers[opponent].withPairTax();
             case "nevoa" -> modifiers[opponent] = modifiers[opponent].withNullifyJokers();
             case "virada_naipes" -> flipPlayedSuits(opponent);
@@ -581,6 +646,8 @@ public final class GameEngine {
         hands[PLAYER_TWO] = new ArrayList<>(
                 deck.subList(rules.handSize(), rules.handSize() * 2));
         drawPile = new ArrayList<>(deck.subList(rules.handSize() * 2, deck.size()));
+        discardsUsed[PLAYER_ONE] = 0;
+        discardsUsed[PLAYER_TWO] = 0;
     }
 
     private int firstResolverFor(int roundNumber) {
@@ -645,7 +712,8 @@ public final class GameEngine {
                 powerHands[player].size(),
                 visiblePlayedPowers,
                 powersLocked[player],
-                ready[player]
+                ready[player],
+                discardsRemaining(player)
         );
     }
 

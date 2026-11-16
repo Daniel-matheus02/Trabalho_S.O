@@ -20,6 +20,9 @@ public interface MatchSession extends AutoCloseable {
 
     void submitPlay(List<Card> cards);
 
+    /** Descarta cartas da mão na fase de compra; substituídas por cartas novas do baralho. */
+    void discardCards(List<Card> cards);
+
     /** Trava os poderes da rodada; lista vazia significa jogar nenhum poder. */
     void lockPowers(List<Integer> powerIndices);
 

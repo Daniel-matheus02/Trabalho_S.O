@@ -37,7 +37,7 @@ public final class ScorePanel extends Table {
         clearChildren();
         if (!hasSelection || result == null) {
             add(Ui.label(skin, "PR\u00c9VIA DA JOGADA", "h3")).left().row();
-            Label prompt = Ui.label(skin, "SELECIONE EXATAMENTE " + maxPlay + " CARTAS",
+            Label prompt = Ui.label(skin, "SELECIONE DE 1 A " + maxPlay + " CARTAS",
                     "body-dim");
             prompt.setWrap(true);
             add(prompt).left().growX().padTop(8).row();

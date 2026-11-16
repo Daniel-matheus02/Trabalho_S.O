@@ -432,7 +432,7 @@ class RoundPresenterTest {
 
     private static PlayerView view(int id, int hp, ScoreResult tableScore) {
         return new PlayerView(id, "P" + id, hp, 300, 3, List.of(), true,
-                cards("AE", "AC"), tableScore, List.of(), 0, List.of(), false, false);
+                cards("AE", "AC"), tableScore, List.of(), 0, List.of(), false, false, 2);
     }
 
     private static List<Card> cards(String... codes) {

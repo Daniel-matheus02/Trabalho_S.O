@@ -306,6 +306,13 @@ public final class GameSession {
                 }
                 engine.submitPlay(playerId, cards);
             }
+            case DISCARD_CARDS -> {
+                List<Card> cards = new ArrayList<>();
+                for (String code : action.cards()) {
+                    cards.add(Card.fromCode(code));
+                }
+                engine.discardCards(playerId, cards);
+            }
             case LOCK_POWERS -> engine.lockPowers(playerId, action.powerIndices());
             case ADVANCE -> engine.advance(playerId);
             case REMATCH -> engine.requestRematch(playerId);

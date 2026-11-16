@@ -460,11 +460,10 @@ class GameEngineTest {
     }
 
     @Test
-    @DisplayName("submitPlay só aceita exatamente cinco cartas distintas da própria mão")
-    void submitRequiresExactlyFiveCardsFromHand() {
+    @DisplayName("submitPlay aceita de 1 a 5 cartas distintas da própria mão")
+    void submitRequiresOneToFiveCardsFromHand() {
         engine.start();
-        assertCode("INVALID_SELECTION",
-                () -> engine.submitPlay(1, engine.handOf(1).subList(0, 4)));
+        assertCode("INVALID_SELECTION", () -> engine.submitPlay(1, List.of()));
         assertCode("INVALID_SELECTION",
                 () -> engine.submitPlay(1, engine.handOf(1).subList(0, 6)));
 
@@ -556,8 +555,106 @@ class GameEngineTest {
                 "a mão continua oculta depois de travar");
     }
 
-    private void assertOrderBeforeResult(GameEngine game, String orderLine) {
-        List<String> texts = game.snapshot().log().stream().map(LogEntry::text).toList();
+    @Test
+    @DisplayName("a jogada aceita de 1 a maxPlay cartas")
+    void submitPlayAcceptsFewerThanMaxPlay() {
+        engine.start();
+        assertCode("INVALID_SELECTION", () -> engine.submitPlay(1, List.of()));
+
+        List<Card> three = engine.handOf(1).subList(0, 3);
+        engine.submitPlay(1, three);
+        assertEquals(3, engine.pendingCardsOf(1).size());
+        assertTrue(engine.snapshot().player(1).submitted());
+
+        List<Card> one = engine.handOf(2).subList(0, 1);
+        engine.submitPlay(2, one);
+        assertEquals(GamePhase.SABOTAGE, engine.phase());
+        assertEquals(1, engine.pendingCardsOf(2).size());
+    }
+
+    @Test
+    @DisplayName("a jogada rejeita mais cartas que o máximo permitido")
+    void submitPlayRejectsMoreThanMaxPlay() {
+        engine.start();
+        assertCode("INVALID_SELECTION",
+                () -> engine.submitPlay(1, engine.handOf(1).subList(0, 6)));
+    }
+
+    @Test
+    @DisplayName("o descarte substitui as cartas e mantém o tamanho da mão")
+    void discardReplacesCardsAndKeepsHandSize() {
+        engine.start();
+        List<Card> handBefore = engine.handOf(1);
+        List<Card> discarded = handBefore.subList(0, 3);
+
+        engine.discardCards(1, discarded);
+
+        List<Card> handAfter = engine.handOf(1);
+        assertEquals(handBefore.size(), handAfter.size());
+        assertFalse(handAfter.stream().anyMatch(discarded::contains),
+                "as cartas descartadas não podem continuar na mão");
+        assertEquals(1, engine.discardsRemaining(1));
+        assertEquals(1, engine.snapshotFor(1).player(1).discardsRemaining());
+    }
+
+    @Test
+    @DisplayName("o descarte é limitado a duas ações por rodada")
+    void discardLimitedToTwoPerRound() {
+        engine.start();
+        engine.discardCards(1, engine.handOf(1).subList(0, 1));
+        engine.discardCards(1, engine.handOf(1).subList(0, 1));
+        assertEquals(0, engine.discardsRemaining(1));
+        assertCode("NO_DISCARDS_LEFT",
+                () -> engine.discardCards(1, engine.handOf(1).subList(0, 1)));
+    }
+
+    @Test
+    @DisplayName("o descarte exige de 1 a 8 cartas")
+    void discardValidatesCardCount() {
+        GameEngine wide = new GameEngine("wide", "Ana", "Beto", new Random(5),
+                new GameRules(300, 10, 5, 3, 0, 0, 0), scoring);
+        wide.start();
+        assertCode("INVALID_SELECTION", () -> wide.discardCards(1, List.of()));
+        assertCode("TOO_MANY_CARDS",
+                () -> wide.discardCards(1, wide.handOf(1).subList(0, 9)));
+
+        wide.discardCards(1, wide.handOf(1).subList(0, 8));
+        assertEquals(10, wide.handOf(1).size());
+        assertEquals(1, wide.discardsRemaining(1));
+    }
+
+    @Test
+    @DisplayName("o descarte rejeita cartas fora da mão e fases erradas")
+    void discardRejectsIllegalCardsAndPhases() {
+        engine.start();
+        assertCode("CARD_NOT_IN_HAND",
+                () -> engine.discardCards(1, List.of(engine.handOf(2).get(0))));
+
+        submitBoth(engine);
+        assertEquals(GamePhase.SABOTAGE, engine.phase());
+        assertCode("WRONG_PHASE",
+                () -> engine.discardCards(1, engine.handOf(1).subList(0, 1)));
+    }
+
+    @Test
+    @DisplayName("os descartes voltam a ficar disponíveis na rodada seguinte")
+    void discardsResetOnNextRound() {
+        engine.start();
+        engine.discardCards(1, engine.handOf(1).subList(0, 1));
+        engine.discardCards(1, engine.handOf(1).subList(0, 1));
+        submitBoth(engine);
+        engine.lockPowers(1, List.of());
+        engine.lockPowers(2, List.of());
+        engine.advance(1);
+        engine.advance(2);
+
+        assertEquals(GamePhase.BUILD, engine.phase());
+        assertEquals(2, engine.round());
+        assertEquals(GameEngine.MAX_DISCARDS_PER_ROUND, engine.discardsRemaining(1));
+        assertEquals(GameEngine.MAX_DISCARDS_PER_ROUND, engine.discardsRemaining(2));
+    }
+
+    private void assertOrderBeforeResult(GameEngine game, String orderLine) {        List<String> texts = game.snapshot().log().stream().map(LogEntry::text).toList();
         int orderIndex = texts.indexOf(orderLine);
         assertTrue(orderIndex >= 0, "o log deve conter " + orderLine);
         int resultIndex = -1;

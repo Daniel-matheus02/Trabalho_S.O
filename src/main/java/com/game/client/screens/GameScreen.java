@@ -32,6 +32,7 @@ import com.game.core.scoring.GlobalModifiers;
 import com.game.core.scoring.Jokers;
 import com.game.core.scoring.ScoreResult;
 import com.game.core.scoring.ScoringEngine;
+import com.game.core.state.GameEngine;
 import com.game.core.state.GamePhase;
 import com.game.core.state.GameSnapshot;
 import com.game.core.state.LogEntry;
@@ -710,7 +711,7 @@ public final class GameScreen extends BaseScreen {
         }
         if (state.isTurnOf(myId)) {
             return submittedLocally ? "JOGADA ENVIADA"
-                    : "SUA VEZ \u2014 ESCOLHA " + state.rules().maxPlay() + " CARTAS";
+                    : "SUA VEZ \u2014 ESCOLHA DE 1 A " + state.rules().maxPlay() + " CARTAS";
         }
         return state.phase() == GamePhase.BUILD ? "VEZ DO OPONENTE" : "AGUARDANDO";
     }
@@ -733,7 +734,8 @@ public final class GameScreen extends BaseScreen {
             return;
         }
         if (!selection.remove(index)) {
-            if (selection.size() >= snapshot.rules().maxPlay()) {
+            if (selection.size() >= Math.max(snapshot.rules().maxPlay(),
+                    GameEngine.MAX_DISCARD_CARDS)) {
                 return;
             }
             selection.add(index);
@@ -782,13 +784,16 @@ public final class GameScreen extends BaseScreen {
         }
         ScoreResult preview = scoring.score(selectedCards(), List.of(),
                 snapshot.globalModifierId());
-        scorePanel.update(preview, selection.size() == snapshot.rules().maxPlay()
-                && snapshot.phase() == GamePhase.BUILD, snapshot.rules().maxPlay());
+        boolean validSelection = !selection.isEmpty()
+                && selection.size() <= snapshot.rules().maxPlay();
+        scorePanel.update(preview, validSelection && snapshot.phase() == GamePhase.BUILD,
+                snapshot.rules().maxPlay());
     }
 
     private void submitPlay() {
         if (snapshot == null || !canInteract(snapshot)
-                || selection.size() != snapshot.rules().maxPlay()) {
+                || selection.isEmpty()
+                || selection.size() > snapshot.rules().maxPlay()) {
             return;
         }
         List<Card> cards = selectedCards();
@@ -808,6 +813,20 @@ public final class GameScreen extends BaseScreen {
     /** QA/DevPreview: percorre o mesmo caminho do botão JOGAR MÃO. */
     public void demoSubmit() {
         submitPlay();
+    }
+
+    /** Descarta as cartas selecionadas e compra o mesmo número de cartas novas. */
+    private void discardSelected() {
+        if (snapshot == null || !canInteract(snapshot)
+                || selection.isEmpty()
+                || selection.size() > GameEngine.MAX_DISCARD_CARDS
+                || snapshot.player(myId).discardsRemaining() <= 0) {
+            return;
+        }
+        List<Card> cards = selectedCards();
+        selection.clear();
+        hand.setSelectedIndices(selection);
+        applyAction(() -> session.discardCards(cards));
     }
 
     // ------------------------------------------------------------------ palco
@@ -867,6 +886,7 @@ public final class GameScreen extends BaseScreen {
                 + ":" + submittedLocally + ":" + selection.size() + ":" + me.powersLocked()
                 + ":" + powerCount + ":" + presenter.powerHandReady()
                 + ":" + presenter.canAdvance()
+                + ":" + me.discardsRemaining()
                 + ":" + (session instanceof NetworkMatchSession network && network.client().isConnected());
         if (signature.equals(actionSignature)) {
             return;
@@ -880,16 +900,25 @@ public final class GameScreen extends BaseScreen {
         switch (state.phase()) {
             case BUILD -> {
                 if (state.isTurnOf(myId) && !submittedLocally && !me.submitted()) {
-                    boolean exactly = selection.size() == state.rules().maxPlay();
-                    info.add(Ui.label(skin, exactly
-                            ? "PRONTO PARA ENVIAR" : "SELECIONE EXATAMENTE "
+                    boolean valid = !selection.isEmpty()
+                            && selection.size() <= state.rules().maxPlay();
+                    boolean canDiscard = !selection.isEmpty()
+                            && selection.size() <= GameEngine.MAX_DISCARD_CARDS
+                            && me.discardsRemaining() > 0;
+                    info.add(Ui.label(skin, valid
+                            ? "PRONTO PARA ENVIAR" : "SELECIONE DE 1 A "
                             + state.rules().maxPlay() + " CARTAS", "small")).left();
                     TextButton clear = Ui.button(skin, "LIMPAR", "ghost", this::clearSelection);
                     clear.setDisabled(selection.isEmpty());
+                    TextButton discard = Ui.button(skin,
+                            "DESCARTAR (" + me.discardsRemaining() + ")", "ghost",
+                            this::discardSelected);
+                    discard.setDisabled(!canDiscard);
                     TextButton submit = Ui.button(skin, "JOGAR MÃO", "gold", this::submitPlay);
-                    submit.setDisabled(!exactly);
-                    buttons.add(clear).width(130).height(36).padRight(10);
-                    buttons.add(submit).width(210).height(36);
+                    submit.setDisabled(!valid);
+                    buttons.add(clear).width(110).height(36).padRight(8);
+                    buttons.add(discard).width(150).height(36).padRight(8);
+                    buttons.add(submit).width(190).height(36);
                 } else {
                     Label waiting = Ui.label(skin, submittedLocally
                             ? "AGUARDANDO O OPONENTE..." : "AGUARDANDO SUA VEZ...", "body-dim");
