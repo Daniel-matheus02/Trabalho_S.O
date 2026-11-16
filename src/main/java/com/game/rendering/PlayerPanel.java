@@ -10,6 +10,9 @@ import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
 import com.game.assets.GameAssets;
 import com.game.core.state.PlayerView;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** Nome, barra de vida, selo de turno e lista de curingas de um lado da mesa. */
 public final class PlayerPanel extends Table {
 
@@ -20,16 +23,16 @@ public final class PlayerPanel extends Table {
 
     private final Label nameLabel;
     private final Label hpLabel;
-    private final Label coinsLabel;
     private final Label statusLabel;
     private final Label turnLabel;
     private final Table turnPill;
     private final HealthBar healthBar;
-    private final JokerRow jokerRow;
     private final Table backRow;
 
-    private int shownBacks = -1;
     private int shownHp = -1;
+    private String backsSignature = "";
+    private boolean showPowerCards = true;
+    private final List<CardActor> backActors = new ArrayList<>();
 
     public PlayerPanel(GameAssets assets, int playerId, boolean showOpponentHand) {
         this(assets, playerId, showOpponentHand, false);
@@ -53,12 +56,10 @@ public final class PlayerPanel extends Table {
                 compact ? 2 : 4, compact ? 8 : 10);
         turnPill.setVisible(false);
         hpLabel = Ui.label(skin, "", compact ? "body" : "hp-number");
-        coinsLabel = Ui.label(skin, "", "gold-small");
         statusLabel = Ui.label(skin, "", "small");
 
         Table head = new Table();
         head.add(nameLabel).left().expandX();
-        head.add(coinsLabel).right().padRight(compact ? 8 : 12);
         head.add(turnPill).padRight(compact ? 8 : 14);
         head.add(hpLabel).right();
         add(head).growX().row();
@@ -68,9 +69,7 @@ public final class PlayerPanel extends Table {
                 .padTop(compact ? 4 : 8).row();
 
         Table bottom = new Table();
-        jokerRow = new JokerRow(assets);
-        bottom.add(statusLabel).left().padRight(8);
-        bottom.add(jokerRow).left().expandX();
+        bottom.add(statusLabel).left().padRight(8).expandX();
         backRow = new Table();
         if (showOpponentHand) {
             bottom.add(backRow).right();
@@ -79,28 +78,39 @@ public final class PlayerPanel extends Table {
     }
 
     public void update(PlayerView view, boolean isTurn, String turnText) {
+        update(view, isTurn, turnText, view.hp(), true);
+    }
+
+    /**
+     * Atualiza o painel com uma vida EXIBIDA separada da vida real e com a escolha entre mostrar
+     * as cartas de poder ocultas ou as cartas restantes na mão.
+     */
+    public void update(PlayerView view, boolean isTurn, String turnText, int displayedHp) {
+        update(view, isTurn, turnText, displayedHp, true);
+    }
+
+    public void update(PlayerView view, boolean isTurn, String turnText, int displayedHp,
+                       boolean showPowers) {
+        showPowerCards = showPowers;
         nameLabel.setText(view.name().toUpperCase());
-        hpLabel.setText(view.hp() + " / " + view.maxHp());
-        if (shownHp >= 0 && view.hp() < shownHp) {
+        hpLabel.setText(displayedHp + " / " + view.maxHp());
+        if (shownHp >= 0 && displayedHp < shownHp) {
             hpLabel.clearActions();
             hpLabel.setColor(Palette.BAD);
             hpLabel.addAction(Actions.color(Color.WHITE, 0.55f));
         }
-        shownHp = view.hp();
-        healthBar.setValues(view.hp(), view.maxHp(), true);
-        jokerRow.update(view.jokers());
-        coinsLabel.setText(view.coins() + " MOEDAS");
-        StringBuilder status = new StringBuilder("SAB ").append(view.sabotageCount());
-        if (view.lossStreak() >= 2) {
-            status.append("  -  AZAR ").append(view.lossStreak());
-        }
-        statusLabel.setText(status.toString());
+        shownHp = displayedHp;
+        healthBar.setValues(displayedHp, view.maxHp(), true);
+        int shownCount = showPowerCards && view.powerCount() > 0
+                ? view.powerCount() : view.handCount();
+        statusLabel.setText((showPowerCards && view.powerCount() > 0
+                ? "PODERES " : "CARTAS ") + shownCount);
 
         turnLabel.setText(turnText);
         turnPill.setVisible(isTurn);
 
         if (showOpponentHand) {
-            updateBacks(view.handCount());
+            updateBacks(view);
         }
     }
 
@@ -113,19 +123,43 @@ public final class PlayerPanel extends Table {
         healthBar.setEffectsEnabled(enabled);
     }
 
-    private void updateBacks(int count) {
-        if (count == shownBacks) {
+    private void updateBacks(PlayerView view) {
+        boolean powers = showPowerCards && view.powerCount() > 0;
+        int count = powers ? view.powerCount() : view.handCount();
+        String signature = (powers ? "P" : "H") + count;
+        if (signature.equals(backsSignature)) {
             return;
         }
-        shownBacks = count;
+        backsSignature = signature;
         backRow.clearChildren();
+        backActors.clear();
         if (count <= 0) {
             backRow.add(Ui.label(skin, "SEM CARTAS", "small"));
             return;
         }
-        CardActor back = CardActor.decorative(assets, null, true, 26);
-        backRow.add(back).padRight(7);
-        backRow.add(Ui.label(skin, count + " CARTAS", "small"));
+        int shown = Math.min(count, 6);
+        for (int i = 0; i < shown; i++) {
+            CardActor back = CardActor.decorative(assets, null, true, 18);
+            backRow.add(back).width(18f).height(25f).padRight(3);
+            backActors.add(back);
+        }
+        backRow.add(Ui.label(skin, count + (powers ? " PODERES" : " CARTAS"), "small"))
+                .padLeft(4);
+    }
+
+    /** Versos atualmente exibidos, usados pela queima da mão do oponente. */
+    public List<CardActor> backActors() {
+        return List.copyOf(backActors);
+    }
+
+    /** Restaura os versos após uma apresentação de resolução/replay. */
+    public void resetBackVisuals() {
+        for (CardActor actor : backActors) {
+            actor.clearActions();
+            actor.setVisible(true);
+            actor.setScale(1f, 1f);
+            actor.getColor().a = 1f;
+        }
     }
 
     public int playerId() {

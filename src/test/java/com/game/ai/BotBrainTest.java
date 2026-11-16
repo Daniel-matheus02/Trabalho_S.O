@@ -1,17 +1,24 @@
 package com.game.ai;
 
 import com.game.core.model.Card;
+import com.game.core.model.PowerCard;
+import com.game.core.model.PowerKind;
+import com.game.core.rules.GameRules;
 import com.game.core.scoring.ScoringEngine;
+import com.game.core.state.GamePhase;
+import com.game.core.state.GameSnapshot;
+import com.game.core.state.PlayerView;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BotBrainTest {
+
+    private static final GameRules POWERS = new GameRules(300, 8, 5, 3, 3, 3, 2);
 
     private final ScoringEngine scoring = new ScoringEngine();
     private final BotBrain brain = new BotBrain(scoring, 5);
@@ -34,69 +41,86 @@ class BotBrainTest {
     @Test
     void choosesTheHighestScoringPlay() {
         List<Card> hand = hand("AE", "AC", "AO", "KE", "KC", "2O", "3P", "7E");
-        List<Card> play = brain.choosePlay(hand, List.of(), null);
+        List<Card> play = brain.choosePlay(hand, null);
 
-        assertTrue(play.size() >= 1 && play.size() <= 5);
+        assertEquals(5, play.size());
         assertTrue(hand.containsAll(play));
 
         int best = 0;
-        for (int size = 1; size <= 5; size++) {
-            for (List<Card> combo : BotBrain.combinations(hand, size)) {
-                best = Math.max(best, scoring.score(combo, List.of(), null).finalScore());
-            }
+        for (List<Card> combo : BotBrain.combinations(hand, 5)) {
+            best = Math.max(best, scoring.score(combo, List.of(), null).finalScore());
         }
         assertEquals(best, scoring.score(play, List.of(), null).finalScore());
     }
 
     @Test
-    void respectsJokersWhenEvaluating() {
-        // Naipe Afiado recompensa espadas; o bot deve explorar isso com o mesmo motor.
-        List<Card> hand = hand("AE", "2E", "3E", "4E", "5E", "9C", "9O", "9P");
-        List<Card> play = brain.choosePlay(hand, List.of("naipe_afiado"), null);
-        assertEquals(5, play.size());
-        assertEquals(5, play.stream().filter(card -> card.suit().code().equals("E")).count());
-    }
-
-    @Test
-    void picksTheJokerWithTheBestMarginalValue() {
-        List<Card> spades = hand("AE", "2E", "3E", "5E");
-        List<String> offers = List.of("combo5", "naipe_afiado", "alto_risco");
-        int index = brain.chooseJoker(offers, spades, List.of(), null);
-        assertEquals("naipe_afiado", offers.get(index));
-    }
-
-    @Test
-    void validOfferIndexesAndRerollHeuristics() {
-        List<Card> hand = hand("2E", "7C", "9O", "JP", "3E", "8C", "KO", "4P");
-        List<String> offers = List.of("combo5", "rio", "escada");
-        int index = brain.chooseJoker(offers, hand, List.of(), null);
-        assertTrue(index >= 0 && index < offers.size());
-
-        assertFalse(brain.shouldReroll(offers, hand, List.of(), null, 0));
-        assertEquals(-1, brain.chooseJoker(List.of(), hand, List.of(), null));
-    }
-
-    @Test
-    void choosesTwoCardsUsingTheCommunityTable() {
-        BotBrain twoCardBrain = new BotBrain(scoring, 2);
+    void alwaysChoosesExactlyMaxPlayCards() {
         List<Card> hand = hand("AE", "AC", "KO", "7E", "2C", "9P", "3E", "4O");
-        List<Card> community = hand("AO", "KC", "5C", "6P", "8O");
-        List<Card> play = twoCardBrain.choosePlay(hand, List.of(), null, community);
-        assertEquals(2, play.size());
+        List<Card> play = brain.choosePlay(hand, null);
+        assertEquals(5, play.size());
         assertTrue(hand.containsAll(play));
-        assertEquals(5, play.size() + community.size() - 2);
     }
 
     @Test
-    void choosesASabotageOrPassesWhenEmpty() {
-        assertEquals(0, brain.chooseSabotage(List.of("peso_chumbo")));
-        assertEquals(-1, brain.chooseSabotage(List.of()));
-        int index = brain.chooseSabotage(List.of("virada_naipes", "nevoa"));
-        assertEquals("nevoa", List.of("virada_naipes", "nevoa").get(index));
+    void enumeratesEverySubsetOfSizeZeroToTwo() {
+        List<List<Integer>> subsets = BotBrain.subsets(6, 2);
+        assertEquals(6 + 15, subsets.size(), "21 subconjuntos não vazios; o vazio é a base");
+        for (List<Integer> subset : subsets) {
+            assertTrue(subset.size() <= 2);
+            assertEquals(subset.size(), subset.stream().distinct().count());
+        }
+    }
+
+    @Test
+    void choosesTheJokerThatImprovesTheScore() {
+        GameSnapshot state = snapshotWith(power(PowerKind.JOKER, "par_mult"),
+                power(PowerKind.JOKER, "quintuplus"));
+        assertEquals(List.of(0), brain.choosePowers(state, 1));
+    }
+
+    @Test
+    void choosesTheSabotageThatLowersTheOpponent() {
+        GameSnapshot state = snapshotWith(power(PowerKind.SABOTAGE, "peso_chumbo"),
+                power(PowerKind.JOKER, "quintuplus"));
+        assertEquals(List.of(0), brain.choosePowers(state, 1));
+    }
+
+    @Test
+    void choosesNoneWhenNothingImprovesTheDifference() {
+        GameSnapshot state = snapshotWith(power(PowerKind.JOKER, "quintuplus"));
+        assertTrue(brain.choosePowers(state, 1).isEmpty());
+    }
+
+    @Test
+    void handlesMissingOrEmptySnapshots() {
+        assertTrue(brain.choosePowers(null, 1).isEmpty());
+        assertTrue(brain.choosePowers(snapshotWith(), 1).isEmpty());
     }
 
     @Test
     void emptyHandIsHandled() {
-        assertTrue(brain.choosePlay(List.of(), List.of(), null).isEmpty());
+        assertTrue(brain.choosePlay(List.of(), null).isEmpty());
+    }
+
+    private static PowerCard power(PowerKind kind, String id) {
+        return new PowerCard(kind, id);
+    }
+
+    /**
+     * Instantâneo mínimo na fase SABOTAGE: mão própria de par de ases, oponente com par de reis.
+     * A mão de poderes é entregue como se o servidor já a tivesse filtrado para o visualizador.
+     */
+    private static GameSnapshot snapshotWith(PowerCard... powers) {
+        List<PowerCard> powerHand = List.of(powers);
+        List<Card> own = hand("AE", "AC");
+        List<Card> opponent = hand("KE", "KC");
+        PlayerView me = new PlayerView(
+                1, "CPU", 300, 300, 3, List.of(), true, own, null,
+                powerHand, powerHand.size(), List.of(), false, false);
+        PlayerView rival = new PlayerView(
+                2, "Humano", 300, 300, 3, List.of(), true, opponent, null,
+                List.of(), 0, List.of(), false, false);
+        return new GameSnapshot("bot", 1, GamePhase.SABOTAGE, 1, 0, POWERS,
+                null, "", "", 1, me, rival, null, 0, List.of());
     }
 }

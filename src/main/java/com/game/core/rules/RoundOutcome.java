@@ -1,13 +1,14 @@
 package com.game.core.rules;
 
 import com.game.core.model.Card;
+import com.game.core.model.PowerCard;
 import com.game.core.scoring.ScoreResult;
 
 import java.util.List;
 
 /**
- * Resultado de uma rodada de combate: ambas as jogadas, a mesa final e o dano causado ao
- * perdedor.
+ * Resultado de uma rodada de combate: as jogadas finais, os poderes jogados por cada lado, os
+ * eventos de poder na ordem de resolução e o dano causado ao perdedor.
  */
 public record RoundOutcome(
         int round,
@@ -15,7 +16,9 @@ public record RoundOutcome(
         ScoreResult player2Score,
         List<Card> player1Cards,
         List<Card> player2Cards,
-        List<Card> community,
+        List<PowerCard> player1Powers,
+        List<PowerCard> player2Powers,
+        List<PowerEvent> powerEvents,
         int winner,
         int loser,
         int damage
@@ -23,15 +26,9 @@ public record RoundOutcome(
     public RoundOutcome {
         player1Cards = List.copyOf(player1Cards);
         player2Cards = List.copyOf(player2Cards);
-        community = List.copyOf(community);
-    }
-
-    /** Construtor de compatibilidade para rodadas sem cartas comunitárias. */
-    public RoundOutcome(int round, ScoreResult player1Score, ScoreResult player2Score,
-                        List<Card> player1Cards, List<Card> player2Cards,
-                        int winner, int loser, int damage) {
-        this(round, player1Score, player2Score, player1Cards, player2Cards, List.of(),
-                winner, loser, damage);
+        player1Powers = List.copyOf(player1Powers);
+        player2Powers = List.copyOf(player2Powers);
+        powerEvents = List.copyOf(powerEvents);
     }
 
     public boolean isTie() {

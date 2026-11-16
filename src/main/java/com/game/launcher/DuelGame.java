@@ -20,7 +20,8 @@ import com.game.core.state.GameSnapshot;
 import com.game.qa.CardColorProbe;
 import com.game.qa.LayoutProbe;
 import com.game.qa.ScreenshotProbe;
-import com.game.server.network.GameServer;
+
+import java.util.List;
 
 /**
  * Ponto de entrada da aplicação que implementa {@link ApplicationListener} do libGDX: é dono dos
@@ -52,6 +53,7 @@ public final class DuelGame extends Game {
                 case "cards" -> CardColorProbe.run(assets);
                 case "layout" -> LayoutProbe.run(this);
                 case "screenshots" -> ScreenshotProbe.run(this);
+                case "frames" -> ScreenshotProbe.runFrames(this);
                 default -> System.out.println("[Probe] desconhecido: " + options.probe());
             }
             Gdx.app.exit();
@@ -66,7 +68,7 @@ public final class DuelGame extends Game {
 
     private void openRequestedScreen(String screen) {
         switch (screen == null ? "menu" : screen) {
-            case "game", "reveal", "draft", "gameover" -> openDemo(screen);
+            case "game", "table", "reveal", "powers", "gameover" -> openDemo(screen);
             case "multiplayer" -> showMultiplayer();
             case "settings" -> showSettings();
             default -> showMainMenu();
@@ -110,37 +112,31 @@ public final class DuelGame extends Game {
         }
     }
 
-    /** Usado por --screen=game|reveal|draft|gameover para renderizar estados predefinidos para QA. */
+    /** Usado por --screen=game|table|powers|reveal|gameover para renderizar estados predefinidos para QA. */
     private void openDemo(String screen) {
-        LocalMatchSession session = screen.equals("gameover")
-                ? new LocalMatchSession(settings.playerName(),
-                        new com.game.core.rules.GameRules(120, 8, 2, 3, 2), new java.util.Random(7))
-                : new LocalMatchSession(settings.playerName());
+        com.game.core.rules.GameRules rules = screen.equals("gameover") || screen.equals("powers")
+                ? new com.game.core.rules.GameRules(300, 8, 5, 3, 3, 3,
+                        screen.equals("gameover") ? 3 : 2)
+                : com.game.core.rules.GameRules.DEFAULT;
+        LocalMatchSession session = new LocalMatchSession(settings.playerName(), rules,
+                new java.util.Random(screen.equals("gameover") ? 7 : 1));
         GameSnapshot snapshot = session.snapshot();
         switch (screen) {
             case "game" -> {
                 GameScreen gameScreen = new GameScreen(this, session, null);
                 switchTo(gameScreen);
-                gameScreen.demoSelect(2);
+                gameScreen.demoSelect(snapshot.rules().maxPlay());
                 return;
             }
+            case "table" -> session.submitPlay(snapshot.player(1).hand()
+                    .subList(0, snapshot.rules().maxPlay()));
             case "reveal" -> {
-                session.submitPlay(snapshot.player(1).hand().subList(0, 2));
-                tickUntil(session, GamePhase.SABOTAGE, 30);
-                if (session.snapshot().phase() == GamePhase.SABOTAGE) {
-                    session.passSabotage();
-                }
+                session.submitPlay(snapshot.player(1).hand().subList(0, snapshot.rules().maxPlay()));
                 tickUntil(session, GamePhase.REVEAL, 30);
             }
-            case "draft" -> {
-                session.submitPlay(snapshot.player(1).hand().subList(0, 2));
+            case "powers" -> {
+                session.submitPlay(snapshot.player(1).hand().subList(0, snapshot.rules().maxPlay()));
                 tickUntil(session, GamePhase.SABOTAGE, 30);
-                if (session.snapshot().phase() == GamePhase.SABOTAGE) {
-                    session.passSabotage();
-                }
-                tickUntil(session, GamePhase.REVEAL, 30);
-                session.advance();
-                tickUntil(session, GamePhase.SHOP, 30);
             }
             case "gameover" -> {
                 for (int i = 0; i < 800; i++) {
@@ -151,27 +147,22 @@ public final class DuelGame extends Game {
                     switch (state.phase()) {
                         case BUILD -> {
                             if (state.currentPlayer() == 1) {
-                                session.submitPlay(state.player(1).hand().subList(0, 2));
+                                session.submitPlay(state.player(1).hand()
+                                        .subList(0, state.rules().maxPlay()));
                             } else {
                                 session.tick(1.2f);
                             }
                         }
                         case SABOTAGE -> {
-                            session.passSabotage();
-                            session.tick(1.2f);
+                            if (!state.player(1).powersLocked()) {
+                                session.lockPowers(List.of());
+                            } else {
+                                session.tick(1.2f);
+                            }
                         }
                         case REVEAL -> {
                             session.advance();
                             session.tick(1.2f);
-                        }
-                        case SHOP -> {
-                            if (!state.player(1).jokerPicked()) {
-                                session.pickJoker(0);
-                            } else if (!state.player(1).shopReady()) {
-                                session.ready();
-                            } else {
-                                session.tick(1.2f);
-                            }
                         }
                         default -> session.tick(1.2f);
                     }

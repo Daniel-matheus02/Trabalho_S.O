@@ -1,5 +1,6 @@
 package com.game.core.scoring;
 
+import com.game.core.model.HandType;
 import com.game.core.model.Suit;
 
 import java.util.LinkedHashMap;
@@ -20,15 +21,21 @@ public final class GlobalModifiers {
             context.addMult(1);
             context.addMultLine("Press\u00e3o Alta: +1 mult");
         });
-        register("festa", "Festa dos Naipes", "+6 fichas por carta jogada", context -> {
-            int value = 6 * context.cardCount();
-            context.addChips(value);
-            context.addPlusLine("Festa dos Naipes: +" + value + " fichas");
+        register("festa", "Festa dos Naipes", "+6 fichas por carta do naipe mais frequente na m\u00e3o", context -> {
+            int best = 0;
+            for (com.game.core.model.Suit suit : com.game.core.model.Suit.values()) {
+                best = Math.max(best, context.countSuit(suit));
+            }
+            if (best > 0) {
+                int value = 6 * best;
+                context.addChips(value);
+                context.addPlusLine("Festa dos Naipes: +" + value + " fichas");
+            }
         });
-        register("dobradinha", "Dobradinha", "mult \u00d72 se jogar 1 ou 2 cartas", context -> {
-            if (context.cardCount() > 0 && context.cardCount() <= 2) {
+        register("mao_fraca", "M\u00e3o Fraca", "mult \u00d72 se a m\u00e3o for Carta Alta ou Par", context -> {
+            if (context.type() == HandType.HIGH_CARD || context.type() == HandType.PAIR) {
                 context.multiplyMult(2);
-                context.addMultLine("Dobradinha: mult x2");
+                context.addMultLine("M\u00e3o Fraca: mult x2");
             }
         });
         register("ouro", "Ouro Corrido", "+10 fichas por \u2666 jogado", context -> {

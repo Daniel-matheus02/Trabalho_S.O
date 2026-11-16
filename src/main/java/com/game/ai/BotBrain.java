@@ -1,14 +1,21 @@
 package com.game.ai;
 
 import com.game.core.model.Card;
+import com.game.core.model.Deck;
 import com.game.core.model.HandEvaluator;
 import com.game.core.model.HandType;
-import com.game.core.scoring.Jokers;
+import com.game.core.model.PowerCard;
+import com.game.core.model.PowerKind;
+import com.game.core.model.Suit;
+import com.game.core.scoring.ScoreModifiers;
 import com.game.core.scoring.ScoreResult;
 import com.game.core.scoring.ScoringEngine;
+import com.game.core.state.GameSnapshot;
+import com.game.core.state.PlayerView;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 
 /**
  * Oponente controlado pelo computador (CPU). Ele avalia toda seleção legal com o mesmo
@@ -17,9 +24,9 @@ import java.util.List;
  */
 public final class BotBrain {
 
-    private static final List<String> SABOTAGE_PRIORITY = List.of(
-            "nevoa", "bloqueio_joker", "peso_chumbo", "anti_flush",
-            "imposto_par", "troca_river", "virada_naipes");
+    /** Sementes fixas para as sabotagens aleatórias simuladas (Troca de Carta). */
+    private static final int RANDOM_SAMPLES = 8;
+    private static final long POWER_SEED = 0x50EEDL;
 
     private final ScoringEngine scoringEngine;
     private final int maxPlay;
@@ -29,22 +36,16 @@ public final class BotBrain {
         this.maxPlay = maxPlay;
     }
 
-    public BotBrain() {
-        this(new ScoringEngine(), 2);
-    }
-
-    /** Escolhe a melhor jogada legal combinando as cartas escolhidas com a mesa. */
-    public List<Card> choosePlay(List<Card> hand, List<String> jokers, String globalModifierId,
-                                 List<Card> community) {
+    /** Escolhe a melhor jogada legal entre as cartas da mão. */
+    public List<Card> choosePlay(List<Card> hand, String globalModifierId) {
         if (hand == null || hand.isEmpty()) {
             return List.of();
         }
-        List<Card> table = community == null ? List.of() : community;
         List<Card> best = null;
         ScoreResult bestScore = null;
         int limit = Math.min(maxPlay, hand.size());
         for (List<Card> combo : HandEvaluator.combinations(hand, limit)) {
-            ScoreResult score = scoringEngine.score(combine(combo, table), jokers, globalModifierId);
+            ScoreResult score = scoringEngine.score(combo, List.of(), globalModifierId);
             if (bestScore == null || isBetter(score, combo.size(), bestScore, best.size())) {
                 bestScore = score;
                 best = combo;
@@ -53,117 +54,169 @@ public final class BotBrain {
         return best == null ? List.of(hand.get(0)) : best;
     }
 
-    public List<Card> choosePlay(List<Card> hand, List<String> jokers, String globalModifierId) {
-        return choosePlay(hand, jokers, globalModifierId, List.of());
-    }
-
     /**
-     * Pontua cada curinga oferecido pela sua contribuição marginal à melhor jogada da mão que o
-     * bot possui no momento. Retorna o índice do curinga que ele quer (0 quando não há ofertas).
+     * Escolhe os poderes da rodada a partir do instantâneo já filtrado do próprio jogador.
+     *
+     * <p>Enumera todos os subconjuntos de tamanho 0 até {@code maxPowersPlayed} da mão de poderes
+     * (no máximo 22), simula cada um contra a mesa visível do oponente e escolhe o que maximiza a
+     * diferença entre a pontuação própria e a do oponente. Não escolhe nada quando nenhum
+     * subconjunto melhora a diferença base.</p>
      */
-    public int chooseJoker(List<String> offers, List<Card> hand, List<String> ownedJokers,
-                           String globalModifierId, List<Card> community) {
-        if (offers == null || offers.isEmpty()) {
-            return -1;
+    public List<Integer> choosePowers(GameSnapshot state, int playerId) {
+        if (state == null) {
+            return List.of();
         }
-        int bestIndex = 0;
-        int bestGain = Integer.MIN_VALUE;
-        int baseline = bestScoreFor(hand, ownedJokers, globalModifierId, community);
-        for (int i = 0; i < offers.size(); i++) {
-            List<String> withJoker = new ArrayList<>(ownedJokers);
-            withJoker.add(offers.get(i));
-            int gain = bestScoreFor(hand, withJoker, globalModifierId, community) - baseline;
-            if (gain > bestGain) {
-                bestGain = gain;
-                bestIndex = i;
+        PlayerView me = state.player(playerId);
+        PlayerView opponent = state.opponentOf(playerId);
+        List<PowerCard> hand = me.powerHand();
+        List<Card> ownCards = me.playedCards();
+        List<Card> opponentCards = opponent.playedCards();
+        if (hand.isEmpty() || ownCards.isEmpty()) {
+            return List.of();
+        }
+
+        int max = Math.min(state.rules().maxPowersPlayed(), hand.size());
+        Random random = new Random(POWER_SEED + 31L * state.round() + playerId);
+        int baseline = ownScore(ownCards, List.of(), state.globalModifierId())
+                - opponentScore(opponentCards, ownCards,
+                state.globalModifierId(), ScoreModifiers.NONE);
+
+        int bestValue = baseline;
+        List<Integer> best = List.of();
+        for (List<Integer> subset : subsets(hand.size(), max)) {
+            if (subset.isEmpty()) {
+                continue;
             }
-        }
-        return bestIndex;
-    }
-
-    public int chooseJoker(List<String> offers, List<Card> hand, List<String> ownedJokers,
-                           String globalModifierId) {
-        return chooseJoker(offers, hand, ownedJokers, globalModifierId, List.of());
-    }
-
-    /** Só rerrola quando toda oferta parece fraca para a mão atual e ainda restam rerollagens grátis. */
-    public boolean shouldReroll(List<String> offers, List<Card> hand, List<String> ownedJokers,
-                                String globalModifierId, int rerollsLeft) {
-        return shouldReroll(offers, hand, ownedJokers, globalModifierId, rerollsLeft, List.of());
-    }
-
-    public boolean shouldReroll(List<String> offers, List<Card> hand, List<String> ownedJokers,
-                                String globalModifierId, int rerollsLeft, List<Card> community) {
-        if (rerollsLeft <= 0 || offers == null || offers.isEmpty()) {
-            return false;
-        }
-        int baseline = bestScoreFor(hand, ownedJokers, globalModifierId, community);
-        int bestGain = Integer.MIN_VALUE;
-        for (String offer : offers) {
-            List<String> withJoker = new ArrayList<>(ownedJokers);
-            withJoker.add(offer);
-            bestGain = Math.max(bestGain,
-                    bestScoreFor(hand, withJoker, globalModifierId, community) - baseline);
-        }
-        return bestGain < Math.max(60, baseline / 10);
-    }
-
-    /**
-     * Escolhe uma sabotagem da mão. Retorna o índice, ou -1 para passar quando não há cartas.
-     * A prioridade favorece desligar jokers e reduzir multiplicadores.
-     */
-    public int chooseSabotage(List<String> hand) {
-        if (hand == null || hand.isEmpty()) {
-            return -1;
-        }
-        int bestIndex = 0;
-        int bestPriority = Integer.MAX_VALUE;
-        for (int i = 0; i < hand.size(); i++) {
-            int priority = SABOTAGE_PRIORITY.indexOf(hand.get(i));
-            if (priority < 0) {
-                priority = SABOTAGE_PRIORITY.size();
+            int value = evaluate(hand, subset, ownCards, opponentCards,
+                    state.globalModifierId(), random);
+            if (value > bestValue) {
+                bestValue = value;
+                best = subset;
             }
-            if (priority < bestPriority) {
-                bestPriority = priority;
-                bestIndex = i;
-            }
-        }
-        return bestIndex;
-    }
-
-    /** Compra enquanto houver espaço na mão e moedas suficientes. */
-    public boolean shouldBuySabotage(int coins, int price, int owned, int maxSabotages) {
-        return owned < maxSabotages && coins >= price;
-    }
-
-    /** Resumo legível por humanos, usado por logs/testes. */
-    public ScoreResult preview(List<Card> hand, List<String> jokers, String globalModifierId) {
-        return scoringEngine.score(hand, jokers, globalModifierId);
-    }
-
-    public String jokerName(String id) {
-        return Jokers.nameOf(id);
-    }
-
-    private int bestScoreFor(List<Card> hand, List<String> jokers, String globalModifierId,
-                             List<Card> community) {
-        if (hand == null || hand.isEmpty()) {
-            return 0;
-        }
-        int best = 0;
-        List<Card> table = community == null ? List.of() : community;
-        int limit = Math.min(maxPlay, hand.size());
-        for (List<Card> combo : HandEvaluator.combinations(hand, limit)) {
-            best = Math.max(best,
-                    scoringEngine.score(combine(combo, table), jokers, globalModifierId).finalScore());
         }
         return best;
     }
 
-    private static List<Card> combine(List<Card> played, List<Card> community) {
-        List<Card> pool = new ArrayList<>(played);
-        pool.addAll(community);
-        return pool;
+    private int evaluate(List<PowerCard> hand, List<Integer> subset,
+                         List<Card> ownCards, List<Card> opponentCards,
+                         String globalModifierId, Random random) {
+        boolean randomSabotage = false;
+        for (int index : subset) {
+            if (hand.get(index).kind() == PowerKind.SABOTAGE
+                    && "troca_carta".equals(hand.get(index).id())) {
+                randomSabotage = true;
+            }
+        }
+        if (!randomSabotage) {
+            return evaluateOnce(hand, subset, ownCards, opponentCards,
+                    globalModifierId, random);
+        }
+        int total = 0;
+        for (int sample = 0; sample < RANDOM_SAMPLES; sample++) {
+            total += evaluateOnce(hand, subset, ownCards, opponentCards,
+                    globalModifierId, random);
+        }
+        return Math.round(total / (float) RANDOM_SAMPLES);
+    }
+
+    /** Uma simulação completa: aplica as sabotagens do subconjunto e pontua os dois lados. */
+    private int evaluateOnce(List<PowerCard> hand, List<Integer> subset,
+                             List<Card> ownCards, List<Card> opponentCards,
+                             String globalModifierId, Random random) {
+        List<String> jokers = new ArrayList<>();
+        ScoreModifiers modifiers = ScoreModifiers.NONE;
+        List<Card> opponentFinal = opponentCards;
+
+        for (int index : subset) {
+            PowerCard card = hand.get(index);
+            if (card.kind() == PowerKind.JOKER) {
+                jokers.add(card.id());
+                continue;
+            }
+            switch (card.id()) {
+                case "anti_flush" -> modifiers = modifiers.withBlockFlush();
+                case "peso_chumbo" -> modifiers = modifiers.withMultPenalty(5);
+                case "imposto_par" -> modifiers = modifiers.withPairTax();
+                case "nevoa" -> modifiers = modifiers.withNullifyJokers();
+                case "virada_naipes" -> opponentFinal = mirrorSuits(opponentFinal);
+                case "troca_carta" -> opponentFinal = swapRandomCard(
+                        opponentFinal, ownCards, random);
+                default -> {
+                    // Sabotagem desconhecida: não faz nada.
+                }
+            }
+        }
+
+        int own = ownScore(ownCards, jokers, globalModifierId);
+        int opponent = opponentScore(opponentFinal, ownCards, globalModifierId, modifiers);
+        return own - opponent;
+    }
+
+    private int ownScore(List<Card> cards, List<String> jokers, String globalModifierId) {
+        return scoringEngine.score(cards, jokers, globalModifierId).finalScore();
+    }
+
+    private int opponentScore(List<Card> cards, List<Card> ownCards,
+                              String globalModifierId, ScoreModifiers modifiers) {
+        return scoringEngine.score(cards, List.of(), globalModifierId, modifiers).finalScore();
+    }
+
+    private static List<Card> mirrorSuits(List<Card> cards) {
+        List<Card> flipped = new ArrayList<>(cards.size());
+        for (Card card : cards) {
+            flipped.add(new Card(card.rank(), switch (card.suit()) {
+                case SPADES -> Suit.HEARTS;
+                case HEARTS -> Suit.SPADES;
+                case DIAMONDS -> Suit.CLUBS;
+                case CLUBS -> Suit.DIAMONDS;
+            }));
+        }
+        return flipped;
+    }
+
+    /** Substitui uma carta aleatória por outra do baralho restante, como a sabotagem real. */
+    private static List<Card> swapRandomCard(List<Card> cards, List<Card> ownCards, Random random) {
+        if (cards.isEmpty()) {
+            return cards;
+        }
+        List<Card> updated = new ArrayList<>(cards);
+        int index = random.nextInt(updated.size());
+        List<Card> known = new ArrayList<>(cards);
+        known.addAll(ownCards);
+        Card replacement = null;
+        for (Card candidate : Deck.shuffled(random)) {
+            if (!known.contains(candidate)) {
+                replacement = candidate;
+                break;
+            }
+        }
+        if (replacement == null) {
+            replacement = Deck.shuffled(random).get(0);
+        }
+        updated.set(index, replacement);
+        return updated;
+    }
+
+    /** Todos os subconjuntos de índices com tamanho entre 0 e {@code max}. */
+    static List<List<Integer>> subsets(int size, int max) {
+        List<List<Integer>> result = new ArrayList<>();
+        collectSubsets(0, size, max, new ArrayList<>(), result);
+        return result;
+    }
+
+    private static void collectSubsets(int start, int size, int max,
+                                       List<Integer> current, List<List<Integer>> result) {
+        if (!current.isEmpty()) {
+            result.add(List.copyOf(current));
+        }
+        if (current.size() == max) {
+            return;
+        }
+        for (int i = start; i < size; i++) {
+            current.add(i);
+            collectSubsets(i + 1, size, max, current, result);
+            current.remove(current.size() - 1);
+        }
     }
 
     private boolean isBetter(ScoreResult candidate, int candidateCards, ScoreResult current, int currentCards) {

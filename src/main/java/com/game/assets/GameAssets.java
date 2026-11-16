@@ -14,25 +14,44 @@ import com.game.rendering.Palette;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.logging.Logger;
 
 /**
- * Detém todos os assets em tempo de execução: um atlas de texturas procedural, as texturas de
- * feltro/vinheta/brilho, a fonte bitmap em várias escalas inteiras e o skin do Scene2D. Tudo é
- * criado em código e liberado junto com a aplicação.
+ * Detém os assets em tempo de execução: um atlas procedural, as imagens dos jokers, as texturas
+ * de feltro/vinheta/brilho, as fontes bitmap e o skin do Scene2D. Os recursos são liberados junto
+ * com a aplicação.
  */
 public final class GameAssets implements Disposable {
 
     private static final int ATLAS_WIDTH = 512;
     private static final int ATLAS_HEIGHT = 512;
+    private static final Logger LOG = Logger.getLogger(GameAssets.class.getName());
+    private static final String JOKER_BASE_FILE = "JOKERBASE.png";
+    private static final Map<String, String> JOKER_IMAGE_FILES = Map.ofEntries(
+            Map.entry("naipe_afiado", "Briga_de_espada.png"),
+            Map.entry("ouro_ardente", "Chuva_de_ouro.png"),
+            Map.entry("coracao", "cortem_a_cabeca.png"),
+            Map.entry("pau_potente", "Pau_potente.png"),
+            Map.entry("escada", "Escada_alta.png"),
+            Map.entry("rio", "o_mar_esta_para_fichas.png"),
+            Map.entry("par_mult", "Par_perfeito.png"),
+            Map.entry("trinca_ouro", "tres_e_mais_gostoso.png"),
+            Map.entry("quintuplus", "quintuplos.png"));
 
     private final TextureAtlas atlas;
     private final Texture atlasTexture;
     private final Texture feltTexture;
     private final Texture glowTexture;
     private final Texture vignetteTexture;
+    private final Map<String, TextureRegion> jokerImages = new HashMap<>();
+    private final List<Texture> jokerImageTextures = new ArrayList<>();
+    private final Set<String> warnedMissingJokers = new HashSet<>();
+    private TextureRegion baseJokerImage;
     private final Map<String, NinePatch> patches = new HashMap<>();
     private final Map<Integer, BitmapFont> fonts = new HashMap<>();
     private final Skin skin;
@@ -88,6 +107,8 @@ public final class GameAssets implements Disposable {
         vignetteTexture = new Texture(ProceduralArt.vignette(256));
         vignetteTexture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
 
+        loadJokerImages();
+
         for (int scale : new int[]{1, 2, 3, 4, 5, 6, 7}) {
             fonts.put(scale, loadFont(scale));
         }
@@ -112,6 +133,8 @@ public final class GameAssets implements Disposable {
         specs.add(spec("cardBack", ProceduralArt.cardBack(72, 100), 18));
         specs.add(spec("cardFaceSmall", ProceduralArt.cardFace(48, 64), 8));
         specs.add(spec("cardBackSmall", ProceduralArt.cardBack(48, 64), 8));
+        specs.add(spec("cardRed", ProceduralArt.roundedRect(72, 100, 18,
+                Palette.rgb(0x8a2f25), Palette.rgb(0x4a1812), 3), 18));
 
         specs.add(spec("buttonGold", ProceduralArt.roundedRect(48, 48, 11,
                 Palette.GOLD, Palette.GOLD_DARK, 3), 14));
@@ -131,9 +154,66 @@ public final class GameAssets implements Disposable {
             specs.add(spec("suit-" + suit.code(), ProceduralArt.suitIcon(suit), 0));
         }
         specs.add(spec("star", ProceduralArt.starIcon(), 0));
-        specs.add(spec("crown", ProceduralArt.crownIcon(), 0));
+        specs.add(spec("skull", ProceduralArt.skullIcon(), 0));
 
         return specs;
+    }
+
+    private void loadJokerImages() {
+        Map<String, TextureRegion> regionsByFile = new HashMap<>();
+        baseJokerImage = loadJokerRegion(JOKER_BASE_FILE, regionsByFile);
+        if (baseJokerImage == null) {
+            baseJokerImage = proceduralJokerBase();
+        }
+        for (Map.Entry<String, String> entry : JOKER_IMAGE_FILES.entrySet()) {
+            TextureRegion region = loadJokerRegion(entry.getValue(), regionsByFile);
+            jokerImages.put(entry.getKey(), region == null ? baseJokerImage : region);
+        }
+    }
+
+    /**
+     * Carrega uma imagem de joker com filtro Nearest. Um arquivo ausente ou ilegível gera um único
+     * aviso e faz o chamador cair na imagem base, sem derrubar o jogo.
+     */
+    private TextureRegion loadJokerRegion(String fileName, Map<String, TextureRegion> cache) {
+        TextureRegion cached = cache.get(fileName);
+        if (cached != null) {
+            return cached;
+        }
+        String path = "assets/jokers/" + fileName;
+        try {
+            if (!Gdx.files.internal(path).exists()) {
+                warnMissing(fileName);
+                return null;
+            }
+            Texture texture = new Texture(Gdx.files.internal(path));
+            texture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+            TextureRegion region = new TextureRegion(texture);
+            cache.put(fileName, region);
+            jokerImageTextures.add(texture);
+            return region;
+        } catch (RuntimeException e) {
+            warnMissing(fileName);
+            return null;
+        }
+    }
+
+    private void warnMissing(String fileName) {
+        if (warnedMissingJokers.add(fileName)) {
+            LOG.warning("Imagem de joker ausente: assets/jokers/" + fileName
+                    + " — usando a imagem base");
+        }
+    }
+
+    private TextureRegion proceduralJokerBase() {
+        Pixmap pixmap = new Pixmap(32, 44, Pixmap.Format.RGBA8888);
+        pixmap.setColor(Palette.PANEL);
+        pixmap.fill();
+        Texture texture = new Texture(pixmap);
+        texture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        pixmap.dispose();
+        jokerImageTextures.add(texture);
+        return new TextureRegion(texture);
     }
 
     private static RegionSpec spec(String name, Pixmap pixmap, int splits) {
@@ -152,6 +232,7 @@ public final class GameAssets implements Disposable {
         font.getRegion().getTexture().setFilter(Texture.TextureFilter.Nearest,
                 Texture.TextureFilter.Nearest);
         font.getData().setScale(scale);
+        font.getData().markupEnabled = true;
         font.setUseIntegerPositions(true);
         return font;
     }
@@ -180,6 +261,14 @@ public final class GameAssets implements Disposable {
         return region;
     }
 
+    public TextureRegion jokerImage(String id) {
+        TextureRegion region = jokerImages.get(id);
+        if (region == null) {
+            region = baseJokerImage;
+        }
+        return region;
+    }
+
     public Texture felt() {
         return feltTexture;
     }
@@ -192,16 +281,8 @@ public final class GameAssets implements Disposable {
         return vignetteTexture;
     }
 
-    public TextureAtlas atlas() {
-        return atlas;
-    }
-
     public Skin skin() {
         return skin;
-    }
-
-    public Texture atlasTexture() {
-        return atlasTexture;
     }
 
     @Override
@@ -216,6 +297,10 @@ public final class GameAssets implements Disposable {
         feltTexture.dispose();
         glowTexture.dispose();
         vignetteTexture.dispose();
+        for (Texture texture : jokerImageTextures) {
+            texture.dispose();
+        }
+        jokerImageTextures.clear();
     }
 
     private record RegionSpec(String name, Pixmap pixmap, int splits) {

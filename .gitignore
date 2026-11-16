@@ -2,10 +2,10 @@
 .gradle/
 build/
 out/
+bin/
+reasonix/
 *.iml
 .idea/
 *.log
 screenshots/
-.reasonix/
-dist/
 __pycache__/

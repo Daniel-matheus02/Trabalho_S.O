@@ -95,22 +95,23 @@ class ScoringEngineTest {
         assertEquals(3, pressure.mult());
 
         ScoreResult party = scoring.score(cards("AE", "AC"), List.of(), "festa");
-        assertEquals(44, party.chips()); // 32 + 12
+        assertEquals(32 + 6, party.chips()); // 32 + 6 pela única carta do naipe mais frequente
 
-        ScoreResult doubleDown = scoring.score(cards("AE"), List.of(), "dobradinha");
-        // base 5 + 11 = 16 fichas, mult 1 x2
-        assertEquals(16, doubleDown.chips());
-        assertEquals(2, doubleDown.mult());
+        ScoreResult weakPair = scoring.score(cards("AE", "AC"), List.of(), "mao_fraca");
+        // base Par: 32 fichas, mult 2 x2
+        assertEquals(32, weakPair.chips());
+        assertEquals(4, weakPair.mult());
 
         ScoreResult gold = scoring.score(cards("AO", "2O"), List.of(), "ouro");
         assertEquals(18 + 20, gold.chips()); // Carta Alta: 5 + 11 + 2 fichas, +20 pelas duas cartas de ouros
     }
 
     @Test
-    @DisplayName("o modificador global Dobradinha não dispara com 3 ou mais cartas")
-    void doubleDownRequiresFewCards() {
-        ScoreResult result = scoring.score(cards("AE", "AC", "KO"), List.of(), "dobradinha");
-        assertEquals(2, result.mult());
+    @DisplayName("o modificador global Mão Fraca só dobra Carta Alta e Par")
+    void weakHandOnlyBoostsHighCardOrPair() {
+        assertEquals(2, scoring.score(cards("AE"), List.of(), "mao_fraca").mult());
+        assertEquals(4, scoring.score(cards("AE", "AC"), List.of(), "mao_fraca").mult());
+        assertEquals(3, scoring.score(cards("AE", "AC", "AO"), List.of(), "mao_fraca").mult());
     }
 
     @Test
@@ -118,17 +119,17 @@ class ScoringEngineTest {
     void jokers() {
         // par de ases: 32 fichas / 2 mult
         assertEquals(32 + 15, scoring.score(cards("AE", "AC"), List.of("naipe_afiado"), null).chips());
-        assertEquals(8, scoring.score(cards("5E", "6C", "7O", "8P", "9E"),
-                List.of("combo5"), null).mult());
-        assertEquals(32 + 50, scoring.score(cards("AE", "AC"), List.of("mao_cheia"), null).chips());
+        assertEquals(32 + 15, scoring.score(cards("AO", "AC"), List.of("ouro_ardente"), null).chips());
+        assertEquals(32 + 15, scoring.score(cards("AC", "AO"), List.of("coracao"), null).chips());
+        assertEquals(32 + 15, scoring.score(cards("AP", "AC"), List.of("pau_potente"), null).chips());
+        assertEquals(65 + 50, scoring.score(cards("5E", "6C", "7O", "8P", "9E"),
+                List.of("escada"), null).chips());
         assertEquals(71 + 30, scoring.score(cards("2E", "5E", "9E", "JE", "KE"),
                 List.of("rio"), null).chips());
         assertEquals(2 + 4, scoring.score(cards("AE", "AC"), List.of("par_mult"), null).mult());
-        assertEquals(32 + 12, scoring.score(cards("AE", "AC"), List.of("coracao"), null).chips());
         assertEquals(63 + 60, scoring.score(cards("AE", "AC", "AO"), List.of("trinca_ouro"), null).chips());
-        assertEquals(65 + 50, scoring.score(cards("5E", "6C", "7O", "8P", "9E"),
-                List.of("escada"), null).chips());
-        assertEquals(5 + 11 + 40, scoring.score(cards("AE"), List.of("alto_risco"), null).chips());
+        assertEquals(4 + 8, scoring.score(cards("AE", "AC", "AO", "KE", "KC"),
+                List.of("quintuplus"), null).mult());
     }
 
     @Test
@@ -137,20 +138,24 @@ class ScoringEngineTest {
         ScoreResult pair = scoring.score(cards("AE", "AC"), List.of("trinca_ouro"), null);
         assertEquals(32, pair.chips());
 
-        ScoreResult highCard = scoring.score(cards("AE"), List.of("mao_cheia"), null);
-        assertEquals(16, highCard.chips());
+        ScoreResult highCard = scoring.score(cards("AE"), List.of("par_mult"), null);
+        assertEquals(1, highCard.mult());
 
-        ScoreResult combo5 = scoring.score(cards("AE", "AC"), List.of("combo5"), null);
-        assertEquals(2, combo5.mult());
+        ScoreResult weakPair = scoring.score(cards("AE", "AC"), List.of("quintuplus"), null);
+        assertEquals(2, weakPair.mult());
+
+        ScoreResult straight = scoring.score(cards("5E", "6C", "7O", "8P", "9E"),
+                List.of("rio"), null);
+        assertEquals(65, straight.chips(), "O Mar exige flush ou melhor");
     }
 
     @Test
     @DisplayName("os curingas acumulam na ordem de aquisição")
     void jokerOrder() {
-        ScoreResult result = scoring.score(cards("AE", "AC"), List.of("mao_cheia", "par_mult"), null);
-        assertEquals(82, result.chips());
+        ScoreResult result = scoring.score(cards("AE", "AP"), List.of("naipe_afiado", "par_mult"), null);
+        assertEquals(47, result.chips());
         assertEquals(6, result.mult());
-        assertEquals(492, result.finalScore());
+        assertEquals(282, result.finalScore());
     }
 
     @Test
@@ -170,11 +175,11 @@ class ScoringEngineTest {
     }
 
     @Test
-    @DisplayName("com 7 cartas, a melhor mão de 5 usa mesa e mão do jogador")
-    void bestFiveFromSevenCardPool() {
-        // Duas cartas do jogador + cinco da mesa: três ases + K + 9 formam a melhor mão.
+    @DisplayName("a melhor mão de 5 entre as cartas jogadas é usada na pontuação")
+    void bestFiveFromPlayedCards() {
+        // Três ases + K + 9 formam a melhor mão entre as cinco cartas jogadas.
         ScoreResult result = scoring.score(
-                cards("AE", "AC", "AO", "KE", "2P", "7C", "9O"), List.of(), null);
+                cards("AE", "AC", "AO", "KE", "9O"), List.of(), null);
         assertEquals(HandType.THREE_OF_A_KIND, result.type());
         assertEquals(5, result.scoringCards().size());
         assertEquals(3, result.scoringCards().stream()
@@ -207,9 +212,10 @@ class ScoringEngineTest {
                 ScoreModifiers.NONE.withPairTax());
         assertEquals(32 - 25, taxed.chips());
 
-        ScoreResult fog = scoring.score(pair, List.of("mao_cheia"), null,
+        ScoreResult fog = scoring.score(pair, List.of("par_mult"), null,
                 ScoreModifiers.NONE.withNullifyJokers());
         assertEquals(32, fog.chips(), "Névoa anula todos os jokers da rodada");
+        assertEquals(2, fog.mult());
     }
 
     private HandType evaluate(String... codes) {

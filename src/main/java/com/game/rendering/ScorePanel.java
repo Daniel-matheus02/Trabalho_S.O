@@ -8,7 +8,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
 import com.badlogic.gdx.utils.Align;
 import com.game.assets.GameAssets;
-import com.game.core.scoring.LineStyle;
 import com.game.core.scoring.ScoreLine;
 import com.game.core.scoring.ScoreResult;
 
@@ -34,11 +33,12 @@ public final class ScorePanel extends Table {
         add().expandY().row();
     }
 
-    public void update(ScoreResult result, boolean hasSelection) {
+    public void update(ScoreResult result, boolean hasSelection, int maxPlay) {
         clearChildren();
         if (!hasSelection || result == null) {
             add(Ui.label(skin, "PR\u00c9VIA DA JOGADA", "h3")).left().row();
-            Label prompt = Ui.label(skin, "SELECIONE DE 1 A 5 CARTAS", "body-dim");
+            Label prompt = Ui.label(skin, "SELECIONE EXATAMENTE " + maxPlay + " CARTAS",
+                    "body-dim");
             prompt.setWrap(true);
             add(prompt).left().growX().padTop(8).row();
             add(Ui.label(skin, "FICHAS \u00d7 MULT = PONTOS", "small")).left().padTop(14).row();

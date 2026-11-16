@@ -273,16 +273,17 @@ public final class ProceduralArt {
         }, Palette.WHITE);
     }
 
-    public static Pixmap crownIcon() {
+    /** Caveira pixelada das cartas de sabotagem. */
+    public static Pixmap skullIcon() {
         return mask(new String[]{
-                "#...#...#",
-                "#...#...#",
-                "#..#.#..#",
+                "..#####..",
+                ".#######.",
                 "##.#.#.##",
+                "###.#.###",
                 "#########",
-                "#########",
-                "#.......#",
-                "#.......#",
+                ".#######.",
+                ".##.#.##.",
+                ".#..#..#.",
                 "........."
         }, Palette.WHITE);
     }

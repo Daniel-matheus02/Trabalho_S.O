@@ -31,10 +31,6 @@ public final class Particles {
         items.clear();
     }
 
-    public boolean isEmpty() {
-        return items.isEmpty();
-    }
-
     /**
      * Brasas e detritos arremessados a partir de um ponto (o bordo da vida que acabou de cair).
      *
@@ -90,6 +86,58 @@ public final class Particles {
             p.rotation = MathUtils.random(0f, 360f);
             p.spin = MathUtils.random(-180f, 180f);
             tmp.set(Palette.GOLD).lerp(Palette.WHITE, MathUtils.random(0f, 0.75f));
+            p.color.set(tmp);
+        }
+    }
+
+    /** Brasas de fogo que sobem da área de uma carta em dissolução. */
+    public void fire(float x, float y, float spreadX, float spreadY, int count) {
+        TextureRegion region = assets.region("white");
+        for (int i = 0; i < count; i++) {
+            Particle p = obtain();
+            if (p == null) {
+                return;
+            }
+            p.region = region;
+            p.x = x + MathUtils.random(-spreadX, spreadX);
+            p.y = y + MathUtils.random(-spreadY, spreadY);
+            p.vx = MathUtils.random(-16f, 16f);
+            p.vy = MathUtils.random(28f, 95f);
+            p.gravity = -22f;
+            p.drag = 0.9f;
+            p.life = MathUtils.random(0.35f, 0.95f);
+            p.maxLife = p.life;
+            p.size = MathUtils.random(2f, 5.5f);
+            p.rotation = MathUtils.random(0f, 360f);
+            p.spin = MathUtils.random(-180f, 180f);
+            tmp.set(Palette.GOLD).lerp(Palette.MULT, MathUtils.random(0.15f, 0.9f));
+            tmp.lerp(Palette.BAD, MathUtils.random(0f, 0.35f));
+            p.color.set(tmp);
+        }
+    }
+
+    /** Fumaça escura que sobe devagar quando as novas cartas surgem. */
+    public void smoke(float x, float y, float spreadX, float spreadY, int count) {
+        TextureRegion region = assets.region("white");
+        for (int i = 0; i < count; i++) {
+            Particle p = obtain();
+            if (p == null) {
+                return;
+            }
+            p.region = region;
+            p.x = x + MathUtils.random(-spreadX, spreadX);
+            p.y = y + MathUtils.random(-spreadY, spreadY);
+            p.vx = MathUtils.random(-10f, 10f);
+            p.vy = MathUtils.random(10f, 42f);
+            p.gravity = 8f;
+            p.drag = 0.6f;
+            p.life = MathUtils.random(0.7f, 1.3f);
+            p.maxLife = p.life;
+            p.size = MathUtils.random(6f, 14f);
+            p.rotation = MathUtils.random(0f, 360f);
+            p.spin = MathUtils.random(-30f, 30f);
+            tmp.set(Palette.FELT_DARK).lerp(Palette.INK_DIM, MathUtils.random(0f, 0.35f));
+            tmp.a = MathUtils.random(0.18f, 0.38f);
             p.color.set(tmp);
         }
     }

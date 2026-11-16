@@ -14,16 +14,11 @@ import com.badlogic.gdx.scenes.scene2d.ui.Skin;
  */
 public final class FixedHeightScrollPane extends ScrollPane {
 
-    private float preferredHeight;
+    private final float preferredHeight;
 
     public FixedHeightScrollPane(Actor widget, Skin skin, float preferredHeight) {
         super(widget, skin);
         this.preferredHeight = Math.max(0f, preferredHeight);
-    }
-
-    public void setPreferredHeight(float value) {
-        preferredHeight = Math.max(0f, value);
-        invalidateHierarchy();
     }
 
     @Override

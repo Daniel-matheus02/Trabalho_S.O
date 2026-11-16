@@ -3,7 +3,6 @@ package com.game.assets;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.NinePatch;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
@@ -40,6 +39,8 @@ public final class SkinFactory {
         gold.fontColor = darkInk;
         gold.overFontColor = darkInk;
         gold.downFontColor = Palette.rgb(0x0d2d21);
+        gold.disabled = drawable(assets, "buttonGold").tint(Palette.rgba(0x6f7a6f, 0.5f));
+        gold.disabledFontColor = Palette.rgba(0x06241a, 0.5f);
         gold.pressedOffsetY = -2;
         skin.add("gold", gold, TextButton.TextButtonStyle.class);
 
@@ -50,6 +51,8 @@ public final class SkinFactory {
         green.font = body;
         green.fontColor = Palette.INK;
         green.overFontColor = Palette.WHITE;
+        green.disabled = drawable(assets, "buttonGreen").tint(Palette.rgba(0x6f7a6f, 0.5f));
+        green.disabledFontColor = Palette.rgba(0xeae6d8, 0.5f);
         green.pressedOffsetY = -2;
         skin.add("green", green, TextButton.TextButtonStyle.class);
 
@@ -59,6 +62,8 @@ public final class SkinFactory {
         danger.down = drawable(assets, "buttonDanger").tint(Palette.rgb(0x4a1812));
         danger.font = body;
         danger.fontColor = Palette.INK;
+        danger.disabled = drawable(assets, "buttonDanger").tint(Palette.rgba(0x6f7a6f, 0.5f));
+        danger.disabledFontColor = Palette.rgba(0xeae6d8, 0.5f);
         danger.pressedOffsetY = -2;
         skin.add("danger", danger, TextButton.TextButtonStyle.class);
 
@@ -69,6 +74,8 @@ public final class SkinFactory {
         ghost.font = Typography.font(assets, Typography.Level.HEADING);
         ghost.fontColor = Palette.INK;
         ghost.overFontColor = Palette.INK;
+        ghost.disabled = drawable(assets, "buttonGhost").tint(Palette.rgba(0x6f7a6f, 0.4f));
+        ghost.disabledFontColor = Palette.rgba(0xeae6d8, 0.45f);
         skin.add("ghost", ghost, TextButton.TextButtonStyle.class);
     }
 

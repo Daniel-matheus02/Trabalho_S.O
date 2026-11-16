@@ -15,7 +15,6 @@ public enum MessageType {
     ROUND_RESULT,
     PLAYER_DAMAGE,
     GAME_OVER,
-    REMATCH_REQUEST,
     PING,
     PONG,
     ERROR

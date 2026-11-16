@@ -1,7 +1,10 @@
 package com.game.client.screens;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Interpolation;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -10,12 +13,22 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
 import com.badlogic.gdx.utils.Align;
+import com.game.client.animation.ScoreCountAnimator;
+import com.game.client.animation.ScoreFeel;
 import com.game.client.controller.MatchSession;
+import com.game.client.controller.LocalMatchSession;
 import com.game.client.controller.NetworkMatchSession;
+import com.game.client.dev.DevPreview;
 import com.game.client.network.ClientEvent;
+import com.game.client.presentation.RoundPresenter;
 import com.game.core.model.Card;
+import com.game.core.model.PowerCard;
+import com.game.core.model.PowerKind;
 import com.game.core.rules.GameRuleException;
 import com.game.core.rules.RoundOutcome;
+import com.game.core.sabotage.Sabotages;
+import com.game.core.scoring.GlobalModifiers;
+import com.game.core.scoring.Jokers;
 import com.game.core.scoring.ScoreResult;
 import com.game.core.scoring.ScoringEngine;
 import com.game.core.state.GamePhase;
@@ -23,14 +36,17 @@ import com.game.core.state.GameSnapshot;
 import com.game.core.state.LogEntry;
 import com.game.core.state.PlayerView;
 import com.game.launcher.DuelGame;
+import com.game.rendering.CardActor;
 import com.game.rendering.CardHand;
-import com.game.rendering.CombatRevealPanel;
+import com.game.rendering.CardTooltip;
 import com.game.rendering.FixedHeightScrollPane;
+import com.game.rendering.HandBurnEffect;
 import com.game.rendering.Palette;
 import com.game.rendering.PlayerPanel;
-import com.game.rendering.SabotagePanel;
+import com.game.rendering.PowerHand;
+import com.game.rendering.ResolutionEffect;
 import com.game.rendering.ScorePanel;
-import com.game.rendering.ShopPanel;
+import com.game.rendering.SharedTablePanel;
 import com.game.rendering.Typography;
 import com.game.rendering.Ui;
 
@@ -39,7 +55,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-/** A mesa: os dois jogadores, barras de vida, mão, prévia da pontuação ao vivo, draft e revelação. */
+/** A mesa: os dois jogadores, barras de vida, mão, prévia da pontuação ao vivo, poderes e revelação. */
 public final class GameScreen extends BaseScreen {
 
     private final MatchSession session;
@@ -51,6 +67,7 @@ public final class GameScreen extends BaseScreen {
     private final PlayerPanel ownPanel;
     private final CardHand hand;
     private final com.badlogic.gdx.scenes.scene2d.ui.Label handPlaceholder;
+    private final Stack handStack;
     private final Table stageArea;
     private final Table actionBar;
     private final ScorePanel scorePanel;
@@ -62,20 +79,32 @@ public final class GameScreen extends BaseScreen {
     private final Label globalName;
     private final Label globalDesc;
     private final Label statusLabel;
-    private final ShopPanel shopPanel;
-    private final SabotagePanel sabotagePanel;
-    private final CombatRevealPanel revealPanel;
+    private final PowerHand powerHand;
+    private final SharedTablePanel sharedTable;
+    private final CardTooltip cardTooltip;
+    private final HandBurnEffect burnEffect;
+    private final ResolutionEffect resolutionEffect;
+    private final ScoreCountAnimator countAnimator;
+    private final RoundPresenter presenter;
+    private final boolean devPreview = DevPreview.enabled();
+    private final Vector2 scratch = new Vector2();
+    private List<CardActor> landingActors;
+    private List<Card> submittedCards = List.of();
+    private List<Integer> submittedIndices = List.of();
 
     private final Set<Integer> selection = new LinkedHashSet<>();
     private List<Card> renderedHand = List.of();
+    private List<PowerCard> renderedPowerHand = List.of();
+    private int renderedPowerRound = -1;
     private GameSnapshot snapshot;
     private long lastVersion = -1;
-    private String stageSignature = "";
     private String actionSignature = "";
     private String logSignature = "";
-    private int lastOutcomeRound = -1;
+    private GamePhase layoutPhase;
     private boolean submittedLocally;
     private boolean keepSessionAlive;
+    private boolean refreshing;
+    private boolean refreshPending;
     private float gameOverDelay = -1f;
     private Table toast;
 
@@ -112,6 +141,11 @@ public final class GameScreen extends BaseScreen {
         this.handPlaceholder = Ui.label(skin, "", "body-dim");
         this.handPlaceholder.setAlignment(Align.center);
         this.handPlaceholder.setVisible(false);
+        this.powerHand = new PowerHand(assets);
+        this.powerHand.setAnimateDeals(!game.settings().reducedMotion());
+        this.powerHand.setOnToggle(this::togglePower);
+        this.powerHand.setOnSelectionChanged(this::onPowerSelectionChanged);
+        this.handStack = new Stack(hand, handPlaceholder, powerHand);
         this.stageArea = Ui.panel(assets, "panelGreen");
         this.stageArea.pad(16).top().left();
         this.actionBar = new Table();
@@ -128,15 +162,47 @@ public final class GameScreen extends BaseScreen {
         this.logScroll.setScrollingDisabled(true, false);
         this.logPanel = Ui.panel(assets, "panelDeep");
         this.logPanel.pad(10).top().left();
-        this.shopPanel = new ShopPanel(assets);
-        this.sabotagePanel = new SabotagePanel(assets);
-        this.revealPanel = new CombatRevealPanel(assets);
+        this.sharedTable = new SharedTablePanel(assets);
+        this.cardTooltip = new CardTooltip(assets, stage);
+        this.powerHand.setTooltip(cardTooltip);
+        this.sharedTable.setTooltip(cardTooltip);
         boolean reducedMotion = game.settings().reducedMotion();
-        this.revealPanel.setAnimateDeals(!reducedMotion);
+        this.sharedTable.setAnimate(!reducedMotion);
         this.ownPanel.setEffectsEnabled(!reducedMotion);
         this.opponentPanel.setEffectsEnabled(!reducedMotion);
+        this.countAnimator = new ScoreCountAnimator(sharedTable, assets, !reducedMotion,
+                this::shakeScreen);
+        this.burnEffect = new HandBurnEffect(assets, stage, hand, opponentPanel,
+                this::shakeScreen);
+        this.resolutionEffect = new ResolutionEffect(assets, stage, sharedTable, powerHand,
+                opponentPanel, cardTooltip, myId);
+        this.presenter = new RoundPresenter(myId, reducedMotion, countAnimator,
+                new RoundPresenter.BurnPlayer() {
+                    @Override
+                    public void play(Runnable onFinished) {
+                        burnEffect.play(onFinished);
+                    }
+
+                    @Override
+                    public void finishNow() {
+                        burnEffect.finishNow();
+                    }
+                },
+                new RoundPresenter.ResolutionPlayer() {
+                    @Override
+                    public void play(com.game.core.rules.RoundOutcome outcome,
+                                     Runnable onFinished) {
+                        resolutionEffect.play(outcome, onFinished);
+                    }
+
+                    @Override
+                    public void finishNow() {
+                        resolutionEffect.finishNow();
+                    }
+                }, this::onPresentationChanged, this::animateOutcomeDamage);
 
         build();
+        stage.addActor(cardTooltip);
         refresh(true);
     }
 
@@ -184,12 +250,12 @@ public final class GameScreen extends BaseScreen {
 
     private void buildLeftColumn() {
         left.top().left();
-        left.add(opponentPanel).growX().height(92).padBottom(6).row();
-        left.add(stageArea).growX().minHeight(196).expandY().padBottom(6).row();
-        left.add(ownPanel).growX().height(72).padBottom(4).row();
-        Stack handStack = new Stack(hand, handPlaceholder);
-        left.add(handStack).growX().height(108).padBottom(2).row();
-        left.add(actionBar).growX().height(40).row();
+        stageArea.clearChildren();
+        stageArea.add(sharedTable).grow().padBottom(4).row();
+        left.add(opponentPanel).growX().fillY().height(92).padBottom(6).row();
+        left.add(stageArea).grow().minHeight(196).padBottom(6).row();
+        left.add(ownPanel).growX().fillY().height(72).padBottom(4).row();
+        left.add(handStack).growX().fillY().height(108).padBottom(2).row();        left.add(actionBar).growX().fillY().height(40).row();
     }
 
     private void buildRightColumn() {
@@ -249,7 +315,31 @@ public final class GameScreen extends BaseScreen {
         if (stacked) {
             body.setMinimumHeight(0f);
             body.add(left).growX().row();
-            body.add(right).growX().padTop(10).row();
+            if (showSidebar()) {
+                body.add(right).growX().padTop(10).row();
+            }
+            // No modo empilhado o espaço vertical é curto: as faixas fixas encolhem para que a
+            // mesa e os botões caibam inteiros na janela mínima.
+            boolean powers = snapshot != null && snapshot.phase() == GamePhase.SABOTAGE;
+            if (left.getCell(opponentPanel) != null) {
+                left.getCell(opponentPanel).height(powers ? 64 : 72);
+            }
+            if (left.getCell(ownPanel) != null) {
+                left.getCell(ownPanel).height(powers ? 60 : 56);
+            }
+            if (left.getCell(actionBar) != null) {
+                left.getCell(actionBar).height(powers ? 32 : 36);
+            }
+            if (left.getCell(stageArea) != null) {
+                left.getCell(stageArea).height(powers ? 100 : 120);
+                left.getCell(stageArea).maxHeight(powers ? 100 : 120);
+                left.getCell(stageArea).expand(false, false);
+            }
+            if (left.getCell(handStack) != null) {
+                left.getCell(handStack).height(handStack.isVisible() ? handHeight() : 0f);
+            }
+            stageArea.pad(8);
+            actionBar.padRight(240);
         } else {
             // Altura mínima do corpo = janela - padding do root - cabeçalho - barra de status.
             body.setMinimumHeight(Math.max(0f, height - headerHeight() - 62f));
@@ -257,12 +347,69 @@ public final class GameScreen extends BaseScreen {
             // lateral nessa largura em janelas estreitas evita recorte horizontal.
             body.add(left).grow().padRight(14f);
             body.add(right).width(SIDEBAR_WIDTH).growY();
+            if (left.getCell(opponentPanel) != null) {
+                left.getCell(opponentPanel).height(92);
+            }
+            if (left.getCell(ownPanel) != null) {
+                left.getCell(ownPanel).height(72);
+            }
+            if (left.getCell(actionBar) != null) {
+                left.getCell(actionBar).height(40);
+            }
+            if (left.getCell(stageArea) != null) {
+                left.getCell(stageArea).minHeight(196);
+                left.getCell(stageArea).maxHeight(Float.MAX_VALUE);
+                left.getCell(stageArea).expand(false, true);
+            }
+            if (left.getCell(handStack) != null) {
+                left.getCell(handStack).height(handStack.isVisible() ? handHeight() : 0f);
+            }
+            stageArea.pad(16);
+            actionBar.padRight(0);
         }
         body.invalidateHierarchy();
+        left.invalidate();
+        stageArea.invalidate();
+    }
+
+    private void adoptLandedCards(PlayerView me) {
+        if (landingActors != null || submittedIndices.isEmpty()) {
+            return;
+        }
+        if (!me.submitted() || !me.playedCards().equals(submittedCards)) {
+            return;
+        }
+        List<CardActor> taken = hand.takeActors(submittedIndices);
+        landingActors = new ArrayList<>(taken.size());
+        for (CardActor actor : taken) {
+            scratch.set(0f, 0f);
+            actor.localToStageCoordinates(scratch);
+            actor.remove();
+            actor.setSelected(false);
+            actor.setInteractive(false);
+            stage.addActor(actor);
+            actor.setPosition(scratch.x, scratch.y);
+            landingActors.add(actor);
+        }
+        submittedIndices = List.of();
+        submittedCards = List.of();
     }
 
     private float headerHeight() {
         return stacked ? 102f : 56f;
+    }
+
+    private float handHeight() {
+        if (snapshot != null && (snapshot.phase() == GamePhase.SABOTAGE
+                || (snapshot.phase() == GamePhase.REVEAL && presenter.isResolving()))) {
+            return stacked ? 130f : 224f;
+        }
+        return stacked ? 84f : 108f;
+    }
+
+    /** No modo empilhado a barra lateral é omitida: a mesa e a mão precisam da altura inteira. */
+    private boolean showSidebar() {
+        return !stacked;
     }
 
     // ------------------------------------------------------------------ quadro
@@ -274,7 +421,40 @@ public final class GameScreen extends BaseScreen {
             session.tick(delta);
         }
         handleEvents();
+        if (referenceOpen) {
+            cardTooltip.hide();
+        }
+        if (!referenceOpen && (presenter.isCounting() || presenter.isBurning()
+                || presenter.isResolving())
+                && (Gdx.input.isKeyJustPressed(Input.Keys.SPACE) || Gdx.input.justTouched())) {
+            presenter.skip();
+        }
         refresh(false);
+        if (devPreview && snapshot != null && DevPreview.replayRequested()) {
+            sharedTable.update(snapshot, myId, List.of(), true);
+        }
+        if (devPreview && snapshot != null && DevPreview.countReplayRequested()) {
+            presenter.replayLastCount();
+        }
+        if (devPreview && snapshot != null && DevPreview.tooltipRequested()) {
+            powerHand.demoHoverFirst(null);
+        }
+        if (devPreview && snapshot != null && DevPreview.burnReplayRequested()) {
+            presenter.replayBurn();
+        }
+        if (devPreview && snapshot != null && DevPreview.resolutionReplayRequested()) {
+            presenter.replayResolution();
+        }
+        if (devPreview && snapshot != null && DevPreview.redealRequested()) {
+            if (snapshot.phase() == GamePhase.SABOTAGE) {
+                if (session instanceof LocalMatchSession local) {
+                    local.redealPowers();
+                    refresh(true);
+                } else {
+                    powerHand.replayDeal();
+                }
+            }
+        }
         if (!referenceOpen && gameOverDelay >= 0) {
             gameOverDelay -= delta;
             if (gameOverDelay <= 0) {
@@ -323,6 +503,23 @@ public final class GameScreen extends BaseScreen {
     // ------------------------------------------------------------------ atualização
 
     private void refresh(boolean force) {
+        if (refreshing) {
+            refreshPending = true;
+            return;
+        }
+        refreshing = true;
+        try {
+            refreshInternal(force);
+        } finally {
+            refreshing = false;
+            if (refreshPending) {
+                refreshPending = false;
+                refresh(true);
+            }
+        }
+    }
+
+    private void refreshInternal(boolean force) {
         GameSnapshot state = session.snapshot();
         if (state == null) {
             statusLabel.setText("AGUARDANDO O IN\u00cdCIO DA PARTIDA...");
@@ -334,43 +531,100 @@ public final class GameScreen extends BaseScreen {
         snapshot = state;
         lastVersion = state.version();
 
+        if (state.phase() != layoutPhase) {
+            layoutPhase = state.phase();
+            if (stacked) {
+                relayout(stage.getWidth(), stage.getHeight(), true);
+            }
+        }
+
         PlayerView me = state.player(myId);
         PlayerView opponent = state.opponentOf(myId);
 
-        roundLabel.setText(state.phase() == GamePhase.GAME_OVER ? "FIM DE JOGO" : "RODADA " + state.round());
+        roundLabel.setText(state.phase() == GamePhase.GAME_OVER
+                ? "FIM DE JOGO" : "RODADA " + state.round());
         globalName.setText(state.globalModifierName());
         globalDesc.setText(state.globalModifierDescription());
-        ownPanel.update(me, state.isTurnOf(myId), "SUA VEZ");
-        opponentPanel.update(opponent, state.isTurnOf(opponent.id()), "VEZ DO OPONENTE");
         turnLabel.setText(headerStatus(state));
 
         List<Card> ownHand = me.hand();
+        adoptLandedCards(me);
         if (!ownHand.equals(renderedHand)) {
             renderedHand = ownHand;
             selection.clear();
+        }
+        if (!me.submitted()) {
             submittedLocally = false;
         }
         selection.removeIf(index -> index >= renderedHand.size());
+
+        // A mesa (cartas/placares) precisa estar pronta antes de a contagem começar.
+        // A resolução lê a mão de poderes antes de o palco ser redesenhado.
+        if (state.phase() == GamePhase.REVEAL && !renderedPowerHand.isEmpty()
+                && powerHand.cards().isEmpty()) {
+            powerHand.setCards(renderedPowerHand, false);
+        }
+        rebuildStage(state, me, opponent);
+        presenter.onSnapshot(state);
+
+        boolean powersPhase = state.phase() == GamePhase.SABOTAGE;
+        boolean revealPhase = state.phase() == GamePhase.REVEAL;
+        boolean resolving = revealPhase && presenter.isResolving();
+        boolean showPowerHand = (powersPhase && presenter.powerHandReady()) || resolving;
+
+        ownPanel.update(me, state.isTurnOf(myId), "SUA VEZ",
+                presenter.displayedHp(myId, me.hp()));
+        opponentPanel.update(opponent, state.isTurnOf(opponent.id()), "VEZ DO OPONENTE",
+                presenter.displayedHp(opponent.id(), opponent.hp()),
+                presenter.powerHandReady());
+
         boolean interactive = canInteract(state);
         hand.setCards(renderedHand, interactive);
         hand.setSelectedIndices(selection);
+        hand.setVisible(!showPowerHand && !revealPhase);
         boolean handMissing = renderedHand.isEmpty();
-        handPlaceholder.setVisible(handMissing);
-        handPlaceholder.setText(state.phase() == GamePhase.REVEAL
-                ? "SUA MÃO VOLTA NA PRÓXIMA RODADA"
+        handPlaceholder.setVisible(!showPowerHand && (revealPhase || handMissing));
+        handPlaceholder.setText(revealPhase || state.phase() == GamePhase.REVEAL
+                ? "SUA M\u00c3O VOLTA NA PR\u00d3XIMA RODADA"
                 : "FIM DA PARTIDA");
-        updatePreview();
 
-        rebuildStage(state, me, opponent);
+        if (showPowerHand) {
+            if (powersPhase) {
+                if (state.round() != renderedPowerRound) {
+                    renderedPowerRound = state.round();
+                    powerHand.clearSelection();
+                }
+                List<PowerCard> powerCards = me.powerHand();
+                if (!powerCards.equals(renderedPowerHand)) {
+                    renderedPowerHand = powerCards;
+                    powerHand.clearSelection();
+                }
+                powerHand.setMaxSelected(state.rules().maxPowersPlayed());
+                powerHand.setCards(powerCards, canLockPowers(state, me));
+            } else {
+                // REVEAL: a mão de poderes permanece com as 6 cartas para os voos da resolução.
+                powerHand.setInteractive(false);
+            }
+            powerHand.setVisible(true);
+        } else {
+            if (!revealPhase && !renderedPowerHand.isEmpty()) {
+                renderedPowerHand = List.of();
+                powerHand.setCards(List.of(), false);
+                powerHand.clearSelection();
+            }
+            if (!revealPhase) {
+                renderedPowerRound = -1;
+            }
+            powerHand.setVisible(false);
+        }
+        handStack.setVisible(showPowerHand || revealPhase || !handMissing);
+        if (left.getCell(handStack) != null) {
+            left.getCell(handStack).height(handStack.isVisible() ? handHeight() : 0f);
+            left.invalidateHierarchy();
+        }
+        updatePreview();
         rebuildActions(state, me);
         refreshLog(state);
-
-        if (state.lastOutcome() == null) {
-            lastOutcomeRound = -1;
-        } else if (state.lastOutcome().round() != lastOutcomeRound) {
-            lastOutcomeRound = state.lastOutcome().round();
-            animateCombat(state.lastOutcome());
-        }
 
         if (state.phase() == GamePhase.GAME_OVER && gameOverDelay < 0) {
             gameOverDelay = game.settings().reducedMotion() ? 0.35f : 1.1f;
@@ -379,16 +633,38 @@ public final class GameScreen extends BaseScreen {
         String networkStatus = session.statusMessage();
         if (networkStatus != null && !networkStatus.isBlank()) {
             statusLabel.setText(networkStatus);
-        } else if (state.phase() == GamePhase.SABOTAGE) {
-            statusLabel.setText("SABOTAGEM \u2014 ORDEM: JOGADOR " + state.firstResolver()
+        } else if (presenter.isBurning()) {
+            statusLabel.setText("QUEIMANDO A M\u00c3O \u2014 CLIQUE OU ESPA\u00c7O PARA PULAR");
+        } else if (presenter.isResolving()) {
+            statusLabel.setText("RESOLVENDO A RODADA \u2014 CLIQUE OU ESPA\u00c7O PARA PULAR");
+        } else if (powersPhase && !presenter.powerHandReady()) {
+            statusLabel.setText("CONTAGEM DA MESA \u2014 CLIQUE OU ESPA\u00c7O PARA ACELERAR");
+        } else if (powersPhase) {
+            statusLabel.setText("PODERES \u2014 ORDEM: JOGADOR " + state.firstResolver()
                     + " PRIMEIRO");
-        } else if (state.phase() == GamePhase.SHOP) {
-            statusLabel.setText("LOJA \u2014 ESCOLHA 1 JOKER E GASTE SUAS MOEDAS");
+        } else if (state.phase() == GamePhase.REVEAL && presenter.isFinalCounting()) {
+            statusLabel.setText("CONTAGEM FINAL \u2014 CLIQUE OU ESPA\u00c7O PARA ACELERAR");
         } else if (state.phase() == GamePhase.REVEAL) {
-            statusLabel.setText("REVELA\u00c7\u00c3O \u2014 COMPARE AS JOGADAS");
+            statusLabel.setText("REVELA\u00c7\u00c3O \u2014 COMPARE AS JOGADAS NA MESA");
+        } else if (state.phase() == GamePhase.GAME_OVER) {
+            statusLabel.setText("FIM DE JOGO");
         } else {
             statusLabel.setText("PROTOCOLO: " + state.globalModifierId()
                     + " \u00b7 VERS\u00c3O " + state.version());
+        }
+    }
+
+    private void onPresentationChanged() {
+        if (refreshing) {
+            refreshPending = true;
+            return;
+        }
+        refresh(true);
+    }
+
+    private void animateOutcomeDamage() {
+        if (snapshot != null && snapshot.lastOutcome() != null) {
+            animateCombat(snapshot.lastOutcome());
         }
     }
 
@@ -402,11 +678,9 @@ public final class GameScreen extends BaseScreen {
         if (state.phase() == GamePhase.SABOTAGE) {
             return "ORDEM DA RODADA: JOGADOR " + state.firstResolver() + " PRIMEIRO";
         }
-        if (state.phase() == GamePhase.SHOP) {
-            return "LOJA DA RODADA";
-        }
         if (state.isTurnOf(myId)) {
-            return submittedLocally ? "JOGADA ENVIADA" : "SUA VEZ \u2014 ESCOLHA 2 CARTAS";
+            return submittedLocally ? "JOGADA ENVIADA"
+                    : "SUA VEZ \u2014 ESCOLHA " + state.rules().maxPlay() + " CARTAS";
         }
         return state.phase() == GamePhase.BUILD ? "VEZ DO OPONENTE" : "AGUARDANDO";
     }
@@ -415,7 +689,7 @@ public final class GameScreen extends BaseScreen {
         if (state.phase() != GamePhase.BUILD || state.currentPlayer() != myId) {
             return false;
         }
-        if (submittedLocally) {
+        if (submittedLocally || state.player(myId).submitted()) {
             return false;
         }
         if (session instanceof NetworkMatchSession network) {
@@ -454,36 +728,32 @@ public final class GameScreen extends BaseScreen {
         if (snapshot == null) {
             return;
         }
-        PlayerView me = snapshot.player(myId);
-        if (snapshot.phase() == GamePhase.REVEAL && snapshot.lastOutcome() != null) {
-            ScoreResult own = myId == 1
-                    ? snapshot.lastOutcome().player1Score()
-                    : snapshot.lastOutcome().player2Score();
-            scorePanel.update(own, true);
+        if (snapshot.phase() == GamePhase.REVEAL) {
+            scorePanel.showMessage("RESOLU\u00c7\u00c3O",
+                    presenter.isResolving()
+                            ? "PODERES VOANDO PARA A MESA..."
+                            : presenter.isFinalCounting()
+                            ? "FICHAS \u00d7 MULT EST\u00c1 SUBINDO NA MESA..."
+                            : "A PONTUA\u00c7\u00c3O FINAL APARECE NA MESA.");
             return;
         }
-        if (snapshot.phase() == GamePhase.SABOTAGE || snapshot.phase() == GamePhase.SHOP) {
-            scorePanel.showMessage("MESA ABERTA",
-                    "AS 5 CARTAS COMUNITÁRIAS JÁ ESTÃO NA MESA. A PONTUAÇÃO FINAL É CALCULADA "
-                            + "DEPOIS DAS SABOTAGENS.");
+        if (snapshot.phase() == GamePhase.SABOTAGE) {
+            scorePanel.showMessage("CONTAGEM DA MESA",
+                    presenter.isBurning()
+                            ? "A M\u00c3O EST\u00c1 QUEIMANDO..."
+                            : presenter.powerHandReady()
+                            ? "ESCOLHA SEUS PODERES NA M\u00c3O."
+                            : "FICHAS E MULT EST\u00c3O SUBINDO NA MESA...");
             return;
         }
         if (snapshot.phase() == GamePhase.GAME_OVER) {
             scorePanel.showMessage("FIM DE JOGO", "O RESULTADO FINAL APARECE NA TELA SEGUINTE.");
             return;
         }
-        ScoreResult preview = scoring.score(combineWithCommunity(selectedCards()), me.jokers(),
+        ScoreResult preview = scoring.score(selectedCards(), List.of(),
                 snapshot.globalModifierId());
         scorePanel.update(preview, selection.size() == snapshot.rules().maxPlay()
-                && snapshot.phase() == GamePhase.BUILD);
-    }
-
-    private List<Card> combineWithCommunity(List<Card> cards) {
-        List<Card> pool = new ArrayList<>(cards);
-        if (snapshot != null) {
-            pool.addAll(snapshot.community());
-        }
-        return pool;
+                && snapshot.phase() == GamePhase.BUILD, snapshot.rules().maxPlay());
     }
 
     private void submitPlay() {
@@ -492,6 +762,8 @@ public final class GameScreen extends BaseScreen {
             return;
         }
         List<Card> cards = selectedCards();
+        submittedIndices = new ArrayList<>(selection);
+        submittedCards = cards;
         session.submitPlay(cards);
         submittedLocally = true;
         selection.clear();
@@ -503,132 +775,40 @@ public final class GameScreen extends BaseScreen {
         refresh(true);
     }
 
+    /** QA/DevPreview: percorre o mesmo caminho do botão JOGAR MÃO. */
+    public void demoSubmit() {
+        submitPlay();
+    }
+
     // ------------------------------------------------------------------ palco
 
     private void rebuildStage(GameSnapshot state, PlayerView me, PlayerView opponent) {
-        String signature = state.phase() + ":" + state.round() + ":" + state.currentPlayer()
-                + ":" + me.ready() + ":" + submittedLocally + ":" + selection.size()
-                + ":" + me.offers() + ":" + me.sabotageOffers() + ":" + me.sabotageHand()
-                + ":" + me.sabotageChosen() + ":" + me.jokerPicked() + ":" + me.shopReady()
-                + ":" + me.coins() + ":" + state.firstResolver() + ":" + state.community()
-                + ":" + (state.lastOutcome() == null ? 0 : state.lastOutcome().round())
-                + ":" + me.hp() + ":" + opponent.hp();
-        if (signature.equals(stageSignature)) {
-            return;
-        }
-        stageSignature = signature;
-        stageArea.clearChildren();
-
-        switch (state.phase()) {
-            case BUILD -> buildTurnStage(state, me, opponent);
-            case REVEAL -> {
-                stageArea.add(revealPanel).grow().row();
-                if (state.lastOutcome() != null) {
-                    revealPanel.update(state.lastOutcome(),
-                            state.player(1), state.player(2));
-                }
-            }
-            case SABOTAGE -> {
-                sabotagePanel.update(state, me, canSabotage(state, me),
-                        this::useSabotage, this::passSabotage);
-                stageArea.add(sabotagePanel).grow().row();
-            }
-            case SHOP -> {
-                boolean canAct = canShop(state);
-                shopPanel.update(state, me, canAct, this::pickJoker, this::buySabotage);
-                stageArea.add(shopPanel).grow().row();
-            }
-            case GAME_OVER -> {
-                stageArea.add(Ui.label(skin, "FIM DE JOGO", "winner")).padBottom(10).row();
-                stageArea.add(Ui.label(skin, "CALCULANDO RESULTADO FINAL...", "body-dim")).row();
-            }
-            default -> stageArea.add(Ui.label(skin, "AGUARDANDO...", "body-dim")).row();
-        }
+        sharedTable.update(state, myId, landingActors == null ? List.of() : landingActors, false);
+        landingActors = null;
     }
 
-    private void buildTurnStage(GameSnapshot state, PlayerView me, PlayerView opponent) {
-        boolean myTurn = state.isTurnOf(myId);
-        String whoStyle = myId == 1 ? "h2-p1" : "h2-p2";
-        if (myTurn && !submittedLocally) {
-            stageArea.add(Ui.label(skin, "SUA VEZ \u2014 ESCOLHA 2 CARTAS", whoStyle))
-                    .left().padBottom(6).row();
-            stageArea.add(Ui.wrapLabel(skin,
-                    "VOCÊ JOGA 2 CARTAS. A MESA ABRE 5 (FLOP · TURN · RIVER) E A MELHOR MÃO DE 5 "
-                            + "ENTRE SUAS 2 + AS 5 DA MESA PONTUA.",
-                    "body-dim")).growX().left().row();
-            stageArea.add(Ui.label(skin, selection.size() + " / " + state.rules().maxPlay()
-                    + " CARTAS SELECIONADAS", "small")).left().padTop(10).row();
-        } else if (submittedLocally) {
-            stageArea.add(Ui.label(skin, "JOGADA ENVIADA", "gold")).left().padBottom(6).row();
-            stageArea.add(Ui.label(skin, "AGUARDANDO O OPONENTE ENVIAR A JOGADA...", "body-dim"))
-                    .left().row();
-            stageArea.add(Ui.label(skin, "O SERVIDOR VALIDA E CALCULA O COMBATE.", "small"))
-                    .left().padTop(10).row();
-        } else {
-            stageArea.add(Ui.label(skin, opponent.name().toUpperCase()
-                    + " EST\u00c1 MONTANDO A JOGADA", myId == 1 ? "h2-p2" : "h2-p1"))
-                    .left().padBottom(6).row();
-            stageArea.add(Ui.label(skin, "AS CARTAS DO OPONENTE PERMANECEM OCULTAS.", "body-dim"))
-                    .left().row();
-            stageArea.add(Ui.label(skin, "AGUARDE A VEZ...", "small")).left().padTop(10).row();
-        }
-        stageArea.add().expandY().row();
-
-        Table rules = new Table();
-        rules.left();
-        rules.add(Ui.label(skin, "COMO PONTUA", "gold-small")).left().padBottom(4).row();
-        rules.add(Ui.label(skin, "FICHAS = BASE DA M\u00c3O + VALOR DAS CARTAS", "small"))
-                .left().row();
-        rules.add(Ui.label(skin, "MULT = MULTIPLICADOR DA M\u00c3O + MODIFICADOR GLOBAL + JOKERS",
-                "small")).left().row();
-        rules.add(Ui.label(skin, "PONTOS = FICHAS \u00d7 MULT   \u00b7   DANO = DIFEREN\u00c7A / 3",
-                "small")).left().row();
-        stageArea.add(rules).left();
-    }
-
-    private void pickJoker(int index) {
-        if (snapshot == null || snapshot.phase() != GamePhase.SHOP || !canShop(snapshot)
-                || snapshot.player(myId).jokerPicked()) {
-            return;
-        }
-        applyAction(() -> session.pickJoker(index));
-    }
-
-    private void buySabotage(int index) {
-        if (snapshot == null || snapshot.phase() != GamePhase.SHOP || !canShop(snapshot)) {
-            return;
-        }
-        PlayerView me = snapshot.player(myId);
-        if (me.sabotageCount() >= snapshot.rules().maxSabotages()
-                || me.coins() < snapshot.rules().sabotagePrice()) {
-            return;
-        }
-        applyAction(() -> session.buySabotage(index));
-    }
-
-    private void useSabotage(int index) {
+    private void confirmPowers() {
         if (snapshot == null || snapshot.phase() != GamePhase.SABOTAGE
-                || !canSabotage(snapshot, snapshot.player(myId))) {
+                || !presenter.powerHandReady()
+                || !canLockPowers(snapshot, snapshot.player(myId))) {
             return;
         }
-        applyAction(() -> session.useSabotage(index));
+        List<Integer> indices = powerHand.sortedSelection();
+        applyAction(() -> session.lockPowers(indices));
     }
 
-    private void passSabotage() {
+    private void togglePower(int index) {
         if (snapshot == null || snapshot.phase() != GamePhase.SABOTAGE
-                || !canSabotage(snapshot, snapshot.player(myId))) {
+                || !canLockPowers(snapshot, snapshot.player(myId))) {
             return;
         }
-        applyAction(session::passSabotage);
+        powerHand.toggle(index);
     }
 
-    private void ready() {
-        if (snapshot == null || snapshot.phase() != GamePhase.SHOP || !canShop(snapshot)
-                || !snapshot.player(myId).jokerPicked()
-                || snapshot.player(myId).shopReady()) {
-            return;
+    private void onPowerSelectionChanged() {
+        if (snapshot != null) {
+            rebuildActions(snapshot, snapshot.player(myId));
         }
-        applyAction(session::ready);
     }
 
     /** Executa uma ação do jogador e mantém a tela sincronizada mesmo se o motor recusá-la. */
@@ -641,12 +821,8 @@ public final class GameScreen extends BaseScreen {
         refresh(true);
     }
 
-    private boolean canShop(GameSnapshot state) {
-        return state.phase() == GamePhase.SHOP && isConnected();
-    }
-
-    private boolean canSabotage(GameSnapshot state, PlayerView me) {
-        return state.phase() == GamePhase.SABOTAGE && !me.sabotageChosen() && isConnected();
+    private boolean canLockPowers(GameSnapshot state, PlayerView me) {
+        return state.phase() == GamePhase.SABOTAGE && !me.powersLocked() && isConnected();
     }
 
     private boolean isConnected() {
@@ -656,10 +832,11 @@ public final class GameScreen extends BaseScreen {
     // ------------------------------------------------------------------ ações
 
     private void rebuildActions(GameSnapshot state, PlayerView me) {
+        int powerCount = powerHand.selection().size();
         String signature = state.phase() + ":" + state.currentPlayer() + ":" + me.ready()
-                + ":" + submittedLocally + ":" + selection.size() + ":" + me.rerolls()
-                + ":" + me.nextRerollCost() + ":" + me.coins() + ":" + me.jokerPicked()
-                + ":" + me.shopReady() + ":" + me.sabotageChosen()
+                + ":" + submittedLocally + ":" + selection.size() + ":" + me.powersLocked()
+                + ":" + powerCount + ":" + presenter.powerHandReady()
+                + ":" + presenter.canAdvance()
                 + ":" + (session instanceof NetworkMatchSession network && network.client().isConnected());
         if (signature.equals(actionSignature)) {
             return;
@@ -672,14 +849,14 @@ public final class GameScreen extends BaseScreen {
 
         switch (state.phase()) {
             case BUILD -> {
-                if (state.isTurnOf(myId) && !submittedLocally) {
+                if (state.isTurnOf(myId) && !submittedLocally && !me.submitted()) {
                     boolean exactly = selection.size() == state.rules().maxPlay();
                     info.add(Ui.label(skin, exactly
                             ? "PRONTO PARA ENVIAR" : "SELECIONE EXATAMENTE "
                             + state.rules().maxPlay() + " CARTAS", "small")).left();
                     TextButton clear = Ui.button(skin, "LIMPAR", "ghost", this::clearSelection);
                     clear.setDisabled(selection.isEmpty());
-                    TextButton submit = Ui.button(skin, "ENVIAR JOGADA", "gold", this::submitPlay);
+                    TextButton submit = Ui.button(skin, "JOGAR MÃO", "gold", this::submitPlay);
                     submit.setDisabled(!exactly);
                     buttons.add(clear).width(130).height(44).padRight(10);
                     buttons.add(submit).width(210).height(44);
@@ -690,45 +867,47 @@ public final class GameScreen extends BaseScreen {
                 }
             }
             case SABOTAGE -> {
-                info.add(Ui.label(skin, me.sabotageChosen()
-                        ? "ESCOLHA REGISTRADA. AGUARDANDO O OPONENTE..."
-                        : "USE UMA SABOTAGEM OU PASSE", "small")).left();
-                TextButton pass = Ui.button(skin, me.sabotageChosen() ? "AGUARDANDO..."
-                        : "PASSAR", "ghost", this::passSabotage);
-                pass.setDisabled(me.sabotageChosen() || !canSabotage(state, me));
-                buttons.add(pass).width(180).height(44);
+                int max = state.rules().maxPowersPlayed();
+                if (presenter.isBurning()) {
+                    info.add(Ui.label(skin,
+                            "QUEIMANDO A M\u00c3O... CLIQUE OU ESPA\u00c7O PARA PULAR",
+                            "small")).left();
+                } else if (!presenter.powerHandReady()) {
+                    info.add(Ui.label(skin,
+                            "CONTAGEM DA MESA... CLIQUE OU ESPA\u00c7O PARA ACELERAR",
+                            "small")).left();
+                } else if (me.powersLocked()) {
+                    info.add(Ui.label(skin, "PODERES CONFIRMADOS. AGUARDANDO O OPONENTE...",
+                            "small")).left();
+                } else {
+                    info.add(Ui.label(skin, "CLIQUE AT\u00c9 " + max
+                            + " CARTAS DE PODER NA SUA M\u00c3O", "small")).left();
+                    TextButton confirm = Ui.button(skin,
+                            "CONFIRMAR PODERES (" + powerHand.selection().size() + "/" + max + ")",
+                            "gold", this::confirmPowers);
+                    buttons.add(confirm).width(290).height(44);
+                }
             }
             case REVEAL -> {
-                info.add(Ui.label(skin, me.ready()
-                        ? "VOC\u00ca J\u00c1 CONFIRMOU. AGUARDANDO O OPONENTE..."
-                        : "CONFIRME PARA IR À LOJA", "small")).left();
-                TextButton advance = Ui.button(skin, me.ready() ? "AGUARDANDO..." : "CONTINUAR", "gold",
-                        this::advance);
-                advance.setDisabled(me.ready());
-                buttons.add(advance).width(210).height(44);
-            }
-            case SHOP -> {
-                boolean canAct = canShop(state);
-                String rerollLabel;
-                boolean canReroll;
-                if (me.rerolls() > 0) {
-                    rerollLabel = "ROLAR JOKERS (GRÁTIS x" + me.rerolls() + ")";
-                    canReroll = canAct && !me.jokerPicked();
+                if (presenter.isResolving()) {
+                    info.add(Ui.label(skin,
+                            "RESOLVENDO OS PODERES... CLIQUE OU ESPA\u00c7O PARA PULAR",
+                            "small")).left();
+                } else if (!presenter.canAdvance()) {
+                    info.add(Ui.label(skin,
+                            "CONTAGEM FINAL... CLIQUE OU ESPA\u00c7O PARA ACELERAR",
+                            "small")).left();
                 } else {
-                    rerollLabel = "ROLAR JOKERS (" + me.nextRerollCost() + " MOEDAS)";
-                    canReroll = canAct && !me.jokerPicked() && me.coins() >= me.nextRerollCost();
+                    info.add(Ui.label(skin, me.ready()
+                            ? "VOC\u00ca J\u00c1 CONFIRMOU. AGUARDANDO O OPONENTE..."
+                            : "SUA M\u00c3O VOLTA NA PR\u00d3XIMA RODADA \u00b7 CONFIRME PARA CONTINUAR",
+                            "small")).left();
+                    TextButton advance = Ui.button(skin,
+                            me.ready() ? "AGUARDANDO..." : "CONTINUAR", "gold",
+                            this::advance);
+                    advance.setDisabled(me.ready());
+                    buttons.add(advance).width(210).height(44);
                 }
-                TextButton reroll = Ui.button(skin, rerollLabel, "green", this::reroll);
-                reroll.setDisabled(!canReroll);
-
-                info.add(Ui.label(skin, me.jokerPicked()
-                        ? "JOKER ESCOLHIDO. COMPRE SABOTAGENS OU CONFIRME."
-                        : "ESCOLHA 1 JOKER NA LOJA", "small")).left();
-                TextButton confirm = Ui.button(skin, me.shopReady() ? "AGUARDANDO..."
-                        : "PRONTO", "gold", this::ready);
-                confirm.setDisabled(!canAct || !me.jokerPicked() || me.shopReady());
-                buttons.add(reroll).width(360).height(44).padRight(10);
-                buttons.add(confirm).width(150).height(44);
             }
             case GAME_OVER -> info.add(Ui.label(skin, "FIM DA PARTIDA", "small")).left();
             default -> {
@@ -751,18 +930,11 @@ public final class GameScreen extends BaseScreen {
 
     private void advance() {
         if (snapshot == null || snapshot.phase() != GamePhase.REVEAL
+                || !presenter.canAdvance()
                 || snapshot.player(myId).ready()) {
             return;
         }
         applyAction(session::advance);
-    }
-
-    private void reroll() {
-        if (snapshot == null || snapshot.phase() != GamePhase.SHOP || !canShop(snapshot)
-                || snapshot.player(myId).jokerPicked()) {
-            return;
-        }
-        applyAction(session::reroll);
     }
 
     // ------------------------------------------------------------------ animação de combate
@@ -795,6 +967,26 @@ public final class GameScreen extends BaseScreen {
                 Actions.moveBy(-10, 0, 0.05f),
                 Actions.moveBy(6, 0, 0.04f),
                 Actions.moveBy(-3, 0, 0.04f)));
+    }
+
+    /** Tremor da contagem final: três faixas de intensidade definidas em {@link ScoreFeel}. */
+    public void shakeScreen(int level) {
+        if (level <= 0 || game.settings().reducedMotion()) {
+            return;
+        }
+        int tier = Math.min(level, ScoreFeel.SHAKE_AMPLITUDE.length - 1);
+        float amplitude = ScoreFeel.SHAKE_AMPLITUDE[tier];
+        float step = ScoreFeel.SHAKE_STEP_SECONDS[tier];
+        if (amplitude <= 0f || step <= 0f) {
+            return;
+        }
+        stageArea.clearActions();
+        stageArea.addAction(Actions.sequence(
+                Actions.moveBy(-amplitude, 0f, step),
+                Actions.moveBy(amplitude * 2f, 0f, step),
+                Actions.moveBy(-amplitude * 1.5f, 0f, step),
+                Actions.moveBy(amplitude * 0.8f, 0f, step),
+                Actions.moveBy(-amplitude * 0.3f, 0f, step)));
     }
 
     private void showToast(String text, Color color) {
@@ -845,10 +1037,10 @@ public final class GameScreen extends BaseScreen {
             String style = switch (entry.style()) {
                 case "res" -> "log-gold";
                 case "fim" -> "log-bad";
-                case "draft" -> "log-draft";
+                case "system" -> "log-system";
                 default -> "log";
             };
-            Label line = Ui.label(skin, breakable(entry.text()), style);
+            Label line = Ui.label(skin, breakable(readableLog(entry)), style);
             line.setWrap(true);
             line.setAlignment(Align.left);
             logContent.add(line).left().growX().padBottom(2).row();
@@ -856,6 +1048,71 @@ public final class GameScreen extends BaseScreen {
         logContent.pack();
         logScroll.layout();
         logScroll.setScrollPercentY(1f);
+    }
+
+    /** Traduz os códigos do log do motor para linhas legíveis na interface. */
+    private static String readableLog(LogEntry entry) {
+        String[] parts = entry.text().split("\\|");
+        return switch (parts[0]) {
+            case "GLOBAL" -> "MODIFICADOR GLOBAL: " + globalName(parts[1]);
+            case "ROUND" -> "RODADA " + parts[1] + " COME\u00c7A \u00b7 JOGADOR "
+                    + value(parts[2]) + " RESOLVE PRIMEIRO";
+            case "SUBMIT" -> "JOGADOR " + parts[1] + " ENVIOU: " + cards(parts[2]);
+            case "LOCK" -> "JOGADOR " + parts[1] + " TRAVOU OS PODERES";
+            case "ORDEM" -> "ORDEM DA RODADA " + parts[1] + ": JOGADOR " + parts[2]
+                    + " RESOLVE PRIMEIRO";
+            case "JOKERS" -> "JOGADOR " + parts[1] + " JOGOU JOKERS: " + jokerNames(parts[2]);
+            case "SABOTAGE" -> "JOGADOR " + parts[1] + " USOU " + Sabotages.nameOf(parts[2])
+                    + " CONTRA O JOGADOR " + opponent(parts[1]);
+            case "NIAPES" -> "VIRADA DE NAIPES REESCREVEU A JOGADA DO JOGADOR " + parts[1]
+                    + ": " + replaceArrow(parts[2]);
+            case "TROCA_CARTA" -> "TROCA DE CARTA REESCREVEU A JOGADA DO JOGADOR " + parts[1]
+                    + ": " + replaceArrow(parts[2]);
+            case "RESULT" -> result(parts);
+            case "HP" -> "VIDA FINAL: J1 " + value(parts[1]) + " \u00b7 J2 " + value(parts[2]);
+            case "FIM" -> "FIM DE JOGO: JOGADOR " + value(parts[1]) + " VENCEU";
+            default -> entry.text();
+        };
+    }
+
+    private static String globalName(String id) {
+        var def = GlobalModifiers.byId(id);
+        return def == null ? id : def.name();
+    }
+
+    private static String result(String[] parts) {
+        String winner = value(parts[1]);
+        String outcome = "empate".equals(winner) ? "EMPATE" : "JOGADOR " + winner + " VENCEU";
+        return "RESULTADO: " + outcome + " \u00b7 P1 " + value(parts[2]) + " \u00d7 P2 "
+                + value(parts[3]) + " \u00b7 DANO " + value(parts[4]);
+    }
+
+    private static String value(String token) {
+        int equals = token.indexOf('=');
+        return equals < 0 ? token : token.substring(equals + 1);
+    }
+
+    private static String opponent(String player) {
+        return "1".equals(player) ? "2" : "1";
+    }
+
+    private static String jokerNames(String csv) {
+        StringBuilder text = new StringBuilder();
+        for (String id : csv.split(",")) {
+            if (text.length() > 0) {
+                text.append(", ");
+            }
+            text.append(Jokers.nameOf(id.trim()));
+        }
+        return text.toString();
+    }
+
+    private static String cards(String csv) {
+        return csv.replace(",", " \u00b7 ");
+    }
+
+    private static String replaceArrow(String value) {
+        return value.replace("->", " -> ");
     }
 
     /**
@@ -897,6 +1154,86 @@ public final class GameScreen extends BaseScreen {
         rebuildStage(snapshot, snapshot.player(myId), snapshot.opponentOf(myId));
     }
 
+    /** QA: seleciona as primeiras cartas de poder pelo mesmo caminho do clique. */
+    public void demoSelectPowers(int count) {
+        if (snapshot == null || snapshot.phase() != GamePhase.SABOTAGE) {
+            return;
+        }
+        powerHand.clearSelection();
+        for (int i = 0; i < count; i++) {
+            powerHand.toggle(i);
+        }
+        onPowerSelectionChanged();
+    }
+
+    /** QA: com o limite já atingido, clica na próxima carta para exercitar a recusa. */
+    public void demoRefusedPowerClick() {
+        if (snapshot == null || snapshot.phase() != GamePhase.SABOTAGE) {
+            return;
+        }
+        int next = powerHand.selection().size();
+        powerHand.toggle(next);
+    }
+
+    /** QA: injeta hover determinístico na primeira carta de poder do tipo pedido. */
+    public void demoHoverPower(PowerKind kind) {
+        powerHand.demoHoverFirst(kind);
+    }
+
+    /** QA: injeta hover determinístico em um poder jogado nos slots da mesa. */
+    public void demoHoverPlayedPower(boolean mine, int index) {
+        sharedTable.demoHoverPower(mine, index);
+    }
+
+    /** QA: repete a queima da mão no último instantâneo. */
+    public void demoReplayBurn() {
+        presenter.replayBurn();
+    }
+
+    /** QA: repete a resolução inteira no último resultado. */
+    public void demoReplayResolution() {
+        presenter.replayResolution();
+    }
+
+    /** QA: confirma os poderes já selecionados. */
+    public void demoConfirmPowers() {
+        if (snapshot != null && snapshot.phase() == GamePhase.SABOTAGE
+                && presenter.powerHandReady()) {
+            confirmPowers();
+        }
+    }
+
+    /** QA: conclui resolução e contagem final para capturar o estado final. */
+    public void demoFinishPresentation() {
+        if (presenter.isResolving() || presenter.isCounting() || presenter.isBurning()
+                || presenter.isFinalCounting()) {
+            presenter.skip();
+        }
+    }
+
+    /** QA: conclui só a resolução; a contagem final continua rodando. */
+    public void demoSkipResolution() {
+        if (presenter.isResolving()) {
+            resolutionEffect.finishNow();
+        }
+    }
+
+    /** QA: verdadeiro durante a apresentação da resolução. */
+    public boolean demoIsResolving() {
+        return presenter.isResolving();
+    }
+
+    /** QA: verdadeiro quando a contagem e a primeira queima já entregaram a mão de poderes. */
+    public boolean demoTransitionDone() {
+        return presenter.powerHandReady();
+    }
+
+    public void demoUnhoverPowers() {
+        powerHand.demoUnhover();
+        sharedTable.demoUnhoverPowers();
+        cardTooltip.hide();
+    }
+
     @Override
     protected void onResize(float width, float height) {
         relayout(width, height, false);
@@ -927,6 +1264,8 @@ public final class GameScreen extends BaseScreen {
 
     @Override
     public void dispose() {
+        burnEffect.dispose();
+        resolutionEffect.dispose();
         if (!keepSessionAlive) {
             session.close();
             if (cleanup != null) {

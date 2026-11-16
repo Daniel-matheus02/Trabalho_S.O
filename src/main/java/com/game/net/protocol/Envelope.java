@@ -16,7 +16,4 @@ public record Envelope(
         long timestamp,
         JsonNode payload
 ) {
-    public boolean hasPayload() {
-        return payload != null && !payload.isNull();
-    }
 }

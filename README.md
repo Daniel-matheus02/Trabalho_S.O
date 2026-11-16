@@ -2,7 +2,8 @@
 
 Um duelo de cartas 1v1 inspirado no Balatro, feito como jogo desktop nativo em Java 21
 com libGDX, LWJGL3, Netty e Jackson. As regras evoluíram do protótipo `Duelo de Fichas.html`
-até a v0.6, com cartas comunitárias, economia de moedas, sabotagens e uma loja entre rodadas.
+até a v0.13, com mão de 5 entre 8 cartas, uma mão de 6 poderes misturados por rodada, contagem
+animada estilo Balatro e um modificador global compartilhado.
 O jogo inclui uma mesa polida, IA para um jogador, multiplayer em LAN e um servidor
 autoritativo autônomo. O modo de um jogador não precisa de navegador, servidor nem conexão
 com a internet.
@@ -168,18 +169,15 @@ No Windows use `gradlew.bat` em vez de `./gradlew`.
 
 ### Escolha de curingas
 
-![escolha de curingas](docs/draft.png)
 
 ---
 
 ## 1. Jogabilidade (portada da especificação HTML)
 
-Cada partida começa com os dois jogadores com **300 de vida**, **10 moedas** e um
-**modificador global** aleatório compartilhado por ambos. A cada rodada os dois jogadores
-recebem **8 cartas** de um baralho novo de 52 cartas e cada um envia **exatamente 2 cartas**.
-Depois das duas jogadas a mesa abre **5 cartas comunitárias** (flop → turn → river) e a
-jogada é a **melhor combinação de 5 entre as suas 2 + as 5 da mesa**. A jogada mais forte
-vence a rodada; o perdedor sofre dano.
+Cada partida começa com os dois jogadores com **300 de vida** e um **modificador global**
+aleatório compartilhado por ambos. A cada rodada os dois jogadores recebem **8 cartas** de um
+baralho novo de 52 cartas e cada um envia **exatamente 5 cartas**. As **5 cartas jogadas**
+formam a mão da rodada. A jogada mais forte vence a rodada; o perdedor sofre dano.
 
 ```
 pontuação = round(fichas x mult)   // fichas/mult calculados sobre as 5 cartas que pontuam
@@ -188,45 +186,32 @@ dano = ceil((pontuaçãoVencedor - pontuaçãoPerdedor) / 3)
 
 Empates não causam dano. O jogador que chegar a 0 de vida perde.
 
-### Economia de moedas
+### Poderes por rodada
 
-As moedas são uma carteira gastável na loja; fichas continuam sendo a unidade de pontuação.
-Os números abaixo são os padrões da implementação (as notas da versão fixavam apenas o preço
-crescente do reroll e o bônus de azarão):
+Não há economia, loja, moedas nem rerolls. Depois que os dois jogadores enviam as 5 cartas,
+cada um recebe **uma única mão de 6 cartas**: 3 jokers e 3 sabotagens embaralhados juntos, nunca
+agrupados por tipo, apenas para aquela rodada. Cada jogador pode jogar **até 2 cartas dessa mão**,
+em qualquer combinação: 2 jokers, 2 sabotagens ou 1 de cada (0 ou 1 também vale). As cartas
+jogadas aplicam-se na ordem do índice da mão; o que não for jogado é descartado ao fim da rodada.
+Os dois podem receber mãos de poderes diferentes.
 
-| Evento | Moedas |
-|---|---:|
-| Início da partida | 10 |
-| Fim de cada rodada (cada jogador) | +5 |
-| Bônus do vencedor da rodada | +5 |
-| Bônus de azarão (2+ derrotas seguidas) | +10 por rodada |
-| Sabotagem na loja | 8 |
-| Rerolls grátis de joker por partida | 2 |
-| Reroll pago de joker na mesma visita | 5, depois 10, 15… |
+No cliente, as cartas são a própria interface: clicar numa terceira carta com duas selecionadas é
+recusado com um tremor curto, e o botão **CONFIRMAR PODERES (n/2)** acompanha a contagem.
 
-O **bônus de azarão** é anti-bola-de-neve: quem perde 2 rodadas seguidas recebe +10 moedas e
-continua recebendo enquanto a sequência de derrotas durar. Vencer zera a sequência.
-
-### Sabotagens
-
-Cada jogador pode guardar no máximo **2 sabotagens**. Comprar, usar, acabou: cada carta é de
-**uso único** e só se pode usar **uma por rodada**. Depois que a mesa abre no river, os dois
-escolhem uma sabotagem ou passam; as escolhas resolvem **antes da contagem de pontos**.
+Depois que os dois travam, as sabotagens resolvem e a pontuação é calculada. A **ordem de
+resolução alterna por rodada**: R1 o Jogador 1 resolve primeiro, R2 o Jogador 2, R3 o Jogador 1,
+e assim por diante. Isso importa porque sabotagens de mesa reescrevem a mesma jogada do oponente
+em sequência. A tela mostra a ordem em destaque e o log registra `ORDEM|rodada|primeiro` antes
+de aplicar as cartas.
 
 | Sabotagem | Efeito |
 |---|---|
 | Anti-Flush | Anula o flush do oponente nesta rodada |
-| Peso de Chumbo | O oponente perde 5 de mult |
+| Peso de Chumbo | O oponente perde 5 de mult nesta rodada |
 | Imposto do Par | O oponente perde 25 fichas se a mão final tiver par ou melhor |
-| Bloqueio de Joker | Desativa o primeiro joker do oponente nesta rodada |
 | Névoa | Anula todos os jokers do oponente nesta rodada |
-| Virada de Naipes | Inverte os naipes das 5 cartas da mesa |
-| Troca de River | Substitui a carta do river por uma nova carta do baralho |
-
-A **ordem de resolução alterna por rodada**: R1 o Jogador 1 resolve primeiro, R2 o Jogador 2,
-R3 o Jogador 1, e assim por diante. Isso importa porque sabotagens de mesa reescrevem o mesmo
-tabuleiro compartilhado em sequência. A tela mostra a ordem em destaque e o log registra
-`ORDEM|rodada|primeiro` antes de aplicar as cartas.
+| Virada de Naipes | Inverte os naipes das 5 cartas da jogada do oponente (espadas↔copas, ouros↔paus) |
+| Troca de Carta | Substitui uma carta aleatória da jogada do oponente por uma nova carta do baralho |
 
 ### Valores das mãos
 
@@ -251,42 +236,90 @@ a face. A sequência A-2-3-4-5 conta como sequência.
 |---|---|
 | Mesa Rica | +20 fichas em toda jogada |
 | Pressão Alta | +1 mult em toda jogada |
-| Festa dos Naipes | +6 fichas por carta na mão que pontua |
-| Dobradinha | mult x2 ao jogar 1 ou 2 cartas (legado da v0.2) |
-| Ouro Corrido | +10 fichas por ouros jogado |
+| Festa dos Naipes | +6 fichas por carta do naipe mais frequente na mão |
+| Mão Fraca | mult ×2 se a mão for Carta Alta ou Par |
+| Ouro Corrido | +10 fichas por ♦ jogado |
 
-### Curingas (3 oferecidos por rodada, uma escolha por jogador)
+### Jokers (3 na mão de 6 poderes, até 2 poderes jogados)
 
-Os efeitos abaixo são avaliados sobre as **5 cartas que efetivamente pontuam** (a melhor mão
-entre as suas 2 + a mesa). Os curingas se acumulam pelo resto da partida.
+Os efeitos abaixo são avaliados sobre as **5 cartas jogadas** e valem apenas para a rodada em
+que o joker é jogado.
 
 | Curinga | Efeito |
 |---|---|
-| Naipe Afiado | +15 fichas por espadas na mão que pontua |
-| Combo Quíntuplo | mult x2 quando a mão que pontua tem 5 cartas |
-| Mão Cheia | +50 fichas com par ou melhor |
-| Rio de Fichas | +30 fichas em um flush |
+| Briga de Espada | +15 fichas por ♠ jogada |
+| Chuva de Ouro | +15 fichas por ♦ jogada |
+| Cortem a Cabeça! | +15 fichas por ♥ jogada |
+| Pau Potente | +15 fichas por ♣ jogada |
+| Escada Alta | +50 fichas se a mão for sequência ou melhor |
+| O Mar Está Para Fichas | +30 fichas se a mão for flush ou melhor |
 | Par Perfeito | +4 mult com par ou melhor |
-| Coração Valente | +12 fichas por copas na mão que pontua |
-| Trinca de Ouro | +60 fichas com trinca ou melhor |
-| Escada Firme | +50 fichas em uma sequência |
-| Alto Risco | +40 fichas em uma mão de apenas 1 carta (legado da v0.2) |
+| Três é Mais Gostoso | +60 fichas com trinca ou melhor |
+| Quíntuplus | +8 mult com Full House ou melhor |
 
 ### Fluxo da rodada
 
 1. Os dois jogadores recebem **8 cartas**.
-2. O jogador 1 escolhe e envia **2 cartas**.
-3. O jogador 2 escolhe e envia **2 cartas** (as cartas do adversário permanecem ocultas).
-4. A mesa abre **5 cartas comunitárias** (flop → turn → river).
-5. Cada jogador usa **uma sabotagem ou passa**. As cartas resolvem em ordem alternada
-   (R1 J1, R2 J2, R3 J1…) e o log registra `ORDEM` antes de aplicá-las.
-6. A pontuação é calculada com a melhor mão de 5, o dano é aplicado e todos recebem moedas
-   (vencedor ganha bônus; quem está em sequência de derrotas ganha o bônus de azarão).
-7. Os dois confirmam e vão à **loja**: os mesmos 3 jokers são oferecidos, há 3 sabotagens
-   sorteadas para comprar e cada jogador escolhe 1 joker (2 rerolls grátis; depois 5, 10,
-   15… moedas por reroll na mesma visita). Quem tiver espaço pode comprar até 2 sabotagens.
-8. Os dois confirmam **PRONTO** e uma nova rodada começa com mãos novas. A partida termina
-   quando um jogador chega a 0 de vida.
+2. O jogador 1 escolhe e envia **5 cartas**.
+3. O jogador 2 escolhe e envia **5 cartas** (as cartas do adversário permanecem ocultas).
+4. Cada jogador recebe **6 poderes embaralhados** (3 jokers + 3 sabotagens), escolhe até 2
+   cartas em qualquer combinação e trava os poderes. O que não for jogado é descartado.
+5. As sabotagens resolvem em ordem alternada; a pontuação é calculada sobre as 5 cartas jogadas
+   e o dano é aplicado.
+6. Os dois confirmam a revelação e uma nova rodada começa com mãos e poderes novos. A partida
+   termina quando um jogador chega a 0 de vida.
+
+### Contagem animada (estilo Balatro)
+
+Quando as duas mãos aparecem na mesa, o placar de cada lado vira uma caixa azul de **FICHAS** ×
+uma caixa vermelha de **MULT** = **PONTOS**. A contagem é dirigida pelos `ScoreStep` emitidos pelo
+`ScoringEngine`, então a animação nunca diverge do placar real:
+
+1. O nome da mão entra e o placar mostra a base.
+2. As 5 cartas são contadas da esquerda para a direita, em paralelo nos dois lados. Cada carta
+   pulsa, solta um popup azul de `+N` e as fichas rolam até o novo total.
+3. No fim, `fichas × mult` sobe até a pontuação final, partículas voam para o placar e a tela
+   treme em uma de três intensidades proporcionais à pontuação.
+4. Só então a mão de 3 cartas restantes troca pelos 6 poderes. O jogador escolhe e confirma.
+5. Na revelação, a mesma contagem roda sobre o resultado final, incluindo beats dos jokers e das
+   sabotagens jogadas; o dano só aparece depois do fim da contagem.
+
+A vida exibida fica congelada no valor anterior durante a contagem final; o dano do motor só é
+apresentado quando a contagem termina. Um clique ou **ESPAÇO** acelera a contagem em andamento, e
+um novo instantâneo no meio dela conclui a contagem imediatamente. Com movimento reduzido, as
+contagens são instantâneas.
+
+### Tooltips das cartas de poder
+
+Passar o mouse sobre qualquer carta de poder — na mão, nos dois slots de poder da mesa ou nos
+poderes jogados do oponente na revelação — levanta a carta, escala para ~1,06 e inclina até 3°
+na direção do cursor. Um único overlay no palco mostra o nome da carta e a descrição do catálogo
+(`Jokers.description()`/`Sabotages.description()`), acima da carta ou abaixo dela quando não
+couber, sempre limitado às bordas do palco, com um triângulo-ponteiro e pop-in de 0,85 para 1,0
+em 0,12 s. A colorização é automática: `+N fichas` em azul, `mult` e `xN` em vermelho, e os
+naipes ♠♥♦♣ em suas cores. Só existe um tooltip por vez.
+
+### Queima da mão remanescente
+
+Depois da contagem da mesa, as **3 cartas que sobraram na mão** (as jogadas já foram para a mesa)
+giram 360° em torno do centro, uma após a outra, e então queimam da esquerda para a direita: cada
+carta é renderizada uma vez em um FrameBuffer e dissolvida por um shader de ruído procedural, com
+borda incandescente (amarelo → laranja → vermelho escuro → cinza), brasas que sobem e um pequeno
+tremor no início. A mão fechada do oponente queima do mesmo jeito. Quando a última carta some, as
+6 cartas de poder entram na ordem embaralhada do instantâneo, da esquerda para a direita, com
+0,1 s entre elas, saindo de uma névoa escura. Um clique ou **ESPAÇO** pula toda a transição. A
+queima é executada no máximo uma vez por rodada, mesmo após redraw ou reconexão.
+
+### Resolução da rodada
+
+Logo após os dois jogadores confirmarem, cada poder jogado voa da mão para o slot do seu lado,
+na ordem de resolução do `RoundOutcome` (jogador da vez, depois o índice crescente da mão), com
+`swingOut`, escala 1,0 → 1,2 → 1,0, tooltip por ~1 s e popup do efeito. As cartas não jogadas
+somem; um lado sem poderes mostra "SEM PODER". Se uma sabotagem mudou cartas da mesa
+(`virada_naipes`, `troca_carta`), as cartas afetadas viram com flip scaleX 1 → 0 → 1, revelando
+exatamente o que mudou. Só então roda a contagem final e o dano. Toda a apresentação é lida do
+`RoundOutcome` (nunca recalculada), pode ser pulada com clique/ESPAÇO e é concluída na hora se
+chegar um instantâneo novo. No DevPreview, **F10** repete a resolução inteira.
 
 ---
 
@@ -294,9 +327,9 @@ entre as suas 2 + a mesa). Os curingas se acumulam pelo resto da partida.
 
 `Jogar contra a CPU` inicia uma partida local contra uma IA que usa **o mesmo
 `ScoringEngine` e as mesmas regras de validação dos jogadores humanos**. Ela enumera as
-combinações legais de 2 cartas, pontua cada uma junto com a mesa e escolhe a melhor. Também
-avalia as ofertas de jokers pelo valor marginal, usa rerolls grátis, escolhe sabotagens,
-compra na loja e confirma a rodada sozinha.
+combinações legais de 5 cartas e escolhe a de maior pontuação. Na fase de poderes, enumera todos
+os subconjuntos de até 2 cartas da mão de poderes, simula cada um contra a mesa visível (com
+média de amostras para a sabotagem aleatória) e escolhe o que maximiza a diferença de pontuação.
 
 ---
 
@@ -369,10 +402,24 @@ Tipos de mensagem: `CREATE_SESSION`, `SESSION_CREATED`, `JOIN_SESSION`, `JOIN_AC
 
 ## 4. Controles
 
-- **Mouse** — selecionar cartas, usar/passar sabotagens, comprar na loja, escolher curingas
+- **Mouse** — selecionar cartas, selecionar até 2 poderes e confirmar
+- **Clique / Espaço** — pular a contagem, a queima da mão ou a apresentação da resolução
 - **COMBINAÇÕES** — botão fixo no canto inferior direito abre a tabela das 9 mãos em
   qualquer tela, com fichas × mult, exemplo de cartas e kickers
 - **Esc** — fechar a tabela de combinações, voltar ao menu (fim de jogo: menu; menus: tela anterior)
+
+### Checklist manual de 10 linhas
+
+1. Inicie uma partida local e confira as 8 cartas, a seleção de 5, o pouso na mesa e a prévia.
+2. Envie as duas jogadas e confira a contagem da mesa: fichas azuis, mult vermelho e pontos.
+3. Aguarde a queima: as 3 cartas restantes giram/queimam e os 6 poderes entram misturados.
+4. Selecione 2 poderes; o terceiro clique deve ser recusado com tremor e o botão mostrar `(2/2)`.
+5. Passe o mouse nos poderes da mão, dos slots e do oponente; confira tooltip, cores e pop-in.
+6. Confirme os poderes e confira os voos, os popups, o descarte e o rótulo `SEM PODER`.
+7. Force uma `virada_naipes`/`troca_carta` e veja as cartas afetadas virarem com flip.
+8. Confira a contagem final, a vida segurada até o fim, o dano e o botão `CONTINUAR`.
+9. Pule contagem/queima/resolução com clique ou ESPAÇO e teste F5–F10 e um redraw.
+10. Abra uma partida LAN com dois clientes, jogue/confirmem, confira a mão oculta e a reconexão.
 
 ---
 
@@ -381,9 +428,9 @@ Tipos de mensagem: `CREATE_SESSION`, `SESSION_CREATED`, `JOIN_SESSION`, `JOIN_AC
 ```
 src/main/java/com/game/
 ├── core/
-│   ├── model/     Card, Rank, Suit, Deck, HandType, HandEvaluator
+│   ├── model/     Card, Rank, Suit, Deck, HandType, HandEvaluator, PowerCard, PowerKind
 │   ├── scoring/   ScoringEngine, curingas, modificadores globais, detalhamento da pontuação
-│   ├── sabotage/  Catálogo de sabotagens de mesa/debuff
+│   ├── sabotage/  Catálogo de sabotagens da rodada (mesa e debuff)
 │   ├── rules/     GameRules, CombatResolver, RoundOutcome
 │   └── state/     GameEngine (autoritativo), GameSnapshot, PlayerView
 ├── ai/            BotBrain (mesma pontuação, sem matemática de IA separada)
@@ -392,8 +439,11 @@ src/main/java/com/game/
 ├── client/
 │   ├── network/   GameClient Netty + fluxo de ClientEvent enfileirado
 │   ├── controller/MatchSession, LocalMatchSession, NetworkMatchSession
+│   ├── animation/ ScoreFeel, ScoreCountTimeline, ScoreCountAnimator
+│   ├── presentation/RoundPresenter (contagem, queima, resolução, dano)
 │   └── screens/   Menu principal, multiplayer, jogo, fim de jogo, configurações
-├── rendering/     CardActor, CardHand, HealthBar, ShopPanel, SabotagePanel, painéis, interface procedural
+├── rendering/     CardActor, CardHand, PowerCardActor, PowerHand, SharedTablePanel,
+│                  ScorePanel, CardTooltip, HandBurnEffect, ResolutionEffect
 ├── assets/        Arte procedural, atlas de texturas, fonte em pixels, skin Scene2D
 └── launcher/      DesktopLauncher, ServerLauncher, DuelGame
 ```
@@ -422,7 +472,26 @@ Para verificação visual, o inicializador pode renderizar uma tela, salvar um P
 ./gradlew run --args="--screenshot=C:/tmp/game.png --screen=game"
 ```
 
-Telas válidas: `menu`, `multiplayer`, `settings`, `game`, `reveal`, `draft`, `gameover`.
+Telas válidas: `menu`, `multiplayer`, `settings`, `game`, `table`, `powers`, `reveal`, `gameover`.
+
+Para a verificação visual em lote, o inicializador aceita `--probe=screenshots` (matriz estática em
+`build/qa`, incluindo `poderes-misturados`, `poderes-selecao-2`, `revelacao-2-poderes`, `contagem`,
+`contagem-final`, `tooltip-joker`, `tooltip-sabotagem` e `tooltip-revelacao`, além dos filmstrips
+`poderes-selecao-2-t*.png`, `contagem-t*.png`, `contagem-final-t*.png`, `tooltip-popin-t*.png` e
+`queima-t*.png` e `resolucao-t*.png`), `--probe=frames` (filmstrip da mesa em
+`build/qa/mesa-pouso-t*.png`), `--probe=layout` (overflow e sobreposição de controles) e
+`--probe=cards` (cor das cartas).
+
+### Modo de desenvolvimento (DevPreview)
+
+Com a propriedade `-Dduelo.dev=true`, **F5** repete na mesa a animação de entrada e de virada das
+cartas sobre o último instantâneo, **F6** redistribui a mão de poderes da rodada, **F7** repete a
+contagem, **F8** mostra o tooltip na primeira carta de poder, **F9** repete a queima da mão e
+**F10** repete a resolução inteira:
+
+```bash
+java -Dduelo.dev=true -jar build/libs/duelo-de-fichas-1.0.0.jar --screen=table
+```
 
 ---
 
@@ -432,19 +501,32 @@ Telas válidas: `menu`, `multiplayer`, `settings`, `game`, `reveal`, `draft`, `g
 ./gradlew test
 ```
 
-A suíte contém atualmente 54 testes. A cobertura inclui:
+A suíte contém atualmente 107 testes. A cobertura inclui:
 
 - categorias de mão, a sequência A-5, valores das fichas e arredondamento do multiplicador
 - todos os curingas e modificadores globais, incluindo a ordem de empilhamento
 - cálculo de dano e tratamento de empates
-- ordem dos turnos, erros de validação, informação oculta, limites de escolha e rerolls
-- melhor mão de 5 entre 7 cartas e modificadores de sabotagem (Anti-Flush, Névoa, Peso, Imposto)
-- ordem alternada de sabotagem, uso único, compras por moedas e preço crescente do reroll pago
-- bônus de azarão após sequências de derrota
+- ordem dos turnos, erros de validação, informação oculta, limites de escolha e trava de poderes
+- mão de poderes determinística por semente, com tipos intercalados e oculta do oponente
+- lockPowers aceitando 0, 1 ou 2 cartas em qualquer combinação e rejeitando repetidas/fora do intervalo
+- melhor mão de 5 entre as cartas jogadas e modificadores de sabotagem (Anti-Flush, Névoa, Peso, Imposto)
+- ordem alternada de sabotagem, eventos de poder e descarte dos poderes não jogados
+- 500 mãos aleatórias com 0..2 jokers e 0..2 sabotagens: último passo == placar real
+- passos da contagem ida-e-volta pelo codec Jackson (incluindo `tableScore` e resultado final)
+- timeline de batidas (quantidade, ordem, pausa final e último beat == placar)
+- sequência do `RoundPresenter` com callbacks falsos: contagem da mesa, troca da mão de poderes,
+  contagem final, retenção da vida exibida, dano e replay sem reaplicar dano
+- colorização de palavras-chave do tooltip e matemática de posicionamento (acima/abaixo, clamp
+  horizontal e ponteiro dentro do painel)
+- guarda de "queima uma vez por rodada", skip da queima e conclusão por novo instantâneo
+- ordem dos `PowerEvent` na resolução, cartas antes/depois das sabotagens e round-trip no codec
+- sequência da resolução com callbacks falsos, skip e replay
 - uma partida completa CPU contra CPU até o fim de jogo e a revanche
-- seleção de jogadas pela IA com mesa comunitária, escolha de sabotagem e compras na loja
+- seleção de jogadas pela IA com exatamente 5 cartas e busca por subconjuntos de poderes
 - uma sessão de um jogador com semente fixa, com a CPU jogando até o fim de jogo
+- 200 partidas CPU contra CPU com sementes fixas (término, vida dentro do máximo e nenhuma
+  exceção de regra)
 - ida e volta do protocolo JSON
 - rejeição de comandos duplicados na sessão, tokens de reconexão, ações inválidas
-- uma partida TCP ponta a ponta com dois clientes (criar/entrar, jogar, sabotar, revelar,
-  loja, rodada 2, reconectar)
+- uma partida TCP ponta a ponta com dois clientes (criar/entrar, jogar, poderes, revelar,
+  rodada 2, reconectar)

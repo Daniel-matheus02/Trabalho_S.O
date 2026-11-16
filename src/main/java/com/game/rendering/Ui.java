@@ -1,6 +1,5 @@
 package com.game.rendering;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
@@ -70,30 +69,42 @@ public final class Ui {
         return image;
     }
 
-    /** Tingir uma região para uso como drawable. */
-    public static com.badlogic.gdx.scenes.scene2d.utils.Drawable tintedRegion(GameAssets assets,
-                                                                             String name, Color color) {
-        return new TextureRegionDrawable(assets.region(name)).tint(color);
+    /**
+     * Tremor horizontal curto (≈0,2 s) usado quando uma terceira carta é recusada. Guarda a posição
+     * original para que tremores consecutivos não desloquem o ator.
+     */
+    public static void shakeHorizontally(Actor actor) {
+        if (actor == null) {
+            return;
+        }
+        float originX = actor.getX();
+        actor.clearActions();
+        actor.addAction(com.badlogic.gdx.scenes.scene2d.actions.Actions.sequence(
+                com.badlogic.gdx.scenes.scene2d.actions.Actions.moveTo(originX - 7f,
+                        actor.getY(), 0.03f),
+                com.badlogic.gdx.scenes.scene2d.actions.Actions.moveTo(originX + 7f,
+                        actor.getY(), 0.04f),
+                com.badlogic.gdx.scenes.scene2d.actions.Actions.moveTo(originX - 5f,
+                        actor.getY(), 0.04f),
+                com.badlogic.gdx.scenes.scene2d.actions.Actions.moveTo(originX + 4f,
+                        actor.getY(), 0.03f),
+                com.badlogic.gdx.scenes.scene2d.actions.Actions.moveTo(originX,
+                        actor.getY(), 0.03f)));
     }
 
     /** Feltro em tela cheia + vinheta usados por todas as telas. */
     public static class FeltBackground extends Actor {
         private final GameAssets assets;
-        private final Color tint = new Color(Palette.WHITE);
 
         public FeltBackground(GameAssets assets) {
             this.assets = assets;
             setTouchable(Touchable.disabled);
         }
 
-        public void setTint(Color color) {
-            tint.set(color);
-        }
-
         @Override
         public void draw(Batch batch, float parentAlpha) {
             Texture felt = assets.felt();
-            batch.setColor(tint.r, tint.g, tint.b, parentAlpha);
+            batch.setColor(1f, 1f, 1f, parentAlpha);
             batch.draw(felt, getX(), getY(), getWidth(), getHeight(),
                     0f, 0f, getWidth() / 256f, getHeight() / 256f);
             batch.setColor(1f, 1f, 1f, parentAlpha);

@@ -2,10 +2,13 @@ package com.game.core.state;
 
 import com.game.core.model.Card;
 import com.game.core.model.Deck;
+import com.game.core.model.PowerCard;
+import com.game.core.model.PowerKind;
 import com.game.core.model.Suit;
 import com.game.core.rules.CombatResolver;
 import com.game.core.rules.GameRuleException;
 import com.game.core.rules.GameRules;
+import com.game.core.rules.PowerEvent;
 import com.game.core.rules.RoundOutcome;
 import com.game.core.sabotage.Sabotages;
 import com.game.core.scoring.GlobalModifierDef;
@@ -16,6 +19,7 @@ import com.game.core.scoring.ScoreResult;
 import com.game.core.scoring.ScoringEngine;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -25,11 +29,12 @@ import java.util.Set;
 /**
  * Motor de regras autoritativo de uma partida. Não sabe nada sobre renderização ou rede.
  *
- * <p>Fluxo v0.6: iniciar &rarr; distribuir 8 cartas &rarr; cada jogador envia 2 cartas &rarr; a mesa
- * abre 5 cartas &rarr; cada jogador usa uma sabotagem ou passa (ordem alternada por rodada) &rarr;
- * pontuação e dano &rarr; loja (joker + sabotagens) &rarr; próxima rodada. Todos os métodos que
- * alteram estado são synchronized, para que possam ser chamados com segurança a partir de threads
- * de rede.</p>
+ * <p>Fluxo: iniciar &rarr; distribuir 8 cartas &rarr; cada jogador envia exatamente 5 cartas &rarr;
+ * cada jogador recebe uma única mão embaralhada de 3 jokers + 3 sabotagens e escolhe até
+ * {@link GameRules#maxPowersPlayed()} cartas dela &rarr; pontuação e dano (poderes na ordem
+ * alternada) &rarr; revelação &rarr; próxima rodada. Quando nenhum poder está configurado, a
+ * rodada resolve assim que as duas mãos são enviadas. Todos os métodos que alteram estado são
+ * synchronized, para que possam ser chamados com segurança a partir de threads de rede.</p>
  */
 @SuppressWarnings("unchecked")
 public final class GameEngine {
@@ -41,7 +46,7 @@ public final class GameEngine {
     public static final String STYLE_NORMAL = "";
     public static final String STYLE_RESULT = "res";
     public static final String STYLE_GAME_OVER = "fim";
-    public static final String STYLE_DRAFT = "draft";
+    public static final String STYLE_SYSTEM = "system";
 
     private static final int MAX_LOG_ENTRIES = 200;
 
@@ -52,26 +57,17 @@ public final class GameEngine {
 
     private final String[] playerNames = new String[3];
     private final int[] hp = new int[3];
-    private final int[] coins = new int[3];
-    private final int[] lossStreak = new int[3];
     private final List<Card>[] hands = new List[3];
-    private final List<String>[] jokers = new List[3];
-    private final List<String>[] offers = new List[3];
-    private final List<String>[] sabotageHands = new List[3];
-    private final List<String>[] sabotageOffers = new List[3];
-    private final int[] rerolls = new int[3];
-    private final int[] paidRerolls = new int[3];
+    private final List<PowerCard>[] powerHands = new List[3];
+    private final List<PowerCard>[] playedPowers = new List[3];
+    private final boolean[] powersLocked = new boolean[3];
     private final boolean[] ready = new boolean[3];
-    private final boolean[] shopReady = new boolean[3];
-    private final boolean[] jokerPicked = new boolean[3];
-    private final boolean[] sabotageChosen = new boolean[3];
-    private final String[] chosenSabotage = new String[3];
     private final boolean[] rematch = new boolean[3];
     private final List<Card>[] pendingCards = new List[3];
+    private final ScoreResult[] tableScores = new ScoreResult[3];
 
     private final List<LogEntry> log = new ArrayList<>();
 
-    private List<Card> community = List.of();
     private List<Card> drawPile = List.of();
 
     private GamePhase phase = GamePhase.WAITING;
@@ -104,37 +100,19 @@ public final class GameEngine {
 
     private void resetInternalState() {
         java.util.Arrays.fill(hands, List.of());
-        java.util.Arrays.fill(jokers, List.of());
-        java.util.Arrays.fill(offers, List.of());
-        java.util.Arrays.fill(sabotageHands, List.of());
-        java.util.Arrays.fill(sabotageOffers, List.of());
+        java.util.Arrays.fill(powerHands, List.of());
+        java.util.Arrays.fill(playedPowers, List.of());
         java.util.Arrays.fill(pendingCards, null);
-        java.util.Arrays.fill(chosenSabotage, null);
+        java.util.Arrays.fill(tableScores, null);
+        java.util.Arrays.fill(powersLocked, false);
         java.util.Arrays.fill(ready, false);
-        java.util.Arrays.fill(shopReady, false);
-        java.util.Arrays.fill(jokerPicked, false);
-        java.util.Arrays.fill(sabotageChosen, false);
         java.util.Arrays.fill(rematch, false);
-        java.util.Arrays.fill(coins, 0);
-        java.util.Arrays.fill(lossStreak, 0);
-        java.util.Arrays.fill(paidRerolls, 0);
         hp[PLAYER_ONE] = rules.startingHp();
         hp[PLAYER_TWO] = rules.startingHp();
-        coins[PLAYER_ONE] = rules.startingCoins();
-        coins[PLAYER_TWO] = rules.startingCoins();
-        rerolls[PLAYER_ONE] = rules.rerollsPerMatch();
-        rerolls[PLAYER_TWO] = rules.rerollsPerMatch();
         hands[PLAYER_ONE] = new ArrayList<>();
         hands[PLAYER_TWO] = new ArrayList<>();
-        jokers[PLAYER_ONE] = new ArrayList<>();
-        jokers[PLAYER_TWO] = new ArrayList<>();
-        offers[PLAYER_ONE] = new ArrayList<>();
-        offers[PLAYER_TWO] = new ArrayList<>();
-        sabotageHands[PLAYER_ONE] = new ArrayList<>();
-        sabotageHands[PLAYER_TWO] = new ArrayList<>();
-        sabotageOffers[PLAYER_ONE] = new ArrayList<>();
-        sabotageOffers[PLAYER_TWO] = new ArrayList<>();
-        community = List.of();
+        powerHands[PLAYER_ONE] = new ArrayList<>();
+        powerHands[PLAYER_TWO] = new ArrayList<>();
         drawPile = List.of();
         phase = GamePhase.WAITING;
         round = 1;
@@ -185,33 +163,24 @@ public final class GameEngine {
         return Math.max(0, hp[player]);
     }
 
-    public synchronized int coinsOf(int player) {
-        ensurePlayer(player);
-        return coins[player];
-    }
-
-    public synchronized int lossStreakOf(int player) {
-        ensurePlayer(player);
-        return lossStreak[player];
-    }
-
     public synchronized List<Card> handOf(int player) {
         ensurePlayer(player);
         return List.copyOf(hands[player]);
     }
 
-    public synchronized List<String> jokersOf(int player) {
+    public synchronized List<Card> pendingCardsOf(int player) {
         ensurePlayer(player);
-        return List.copyOf(jokers[player]);
+        return pendingCards[player] == null ? List.of() : List.copyOf(pendingCards[player]);
     }
 
-    public synchronized List<String> sabotageHandOf(int player) {
+    public synchronized List<PowerCard> powerHandOf(int player) {
         ensurePlayer(player);
-        return List.copyOf(sabotageHands[player]);
+        return List.copyOf(powerHands[player]);
     }
 
-    public synchronized List<Card> community() {
-        return List.copyOf(community);
+    public synchronized List<PowerCard> playedPowersOf(int player) {
+        ensurePlayer(player);
+        return List.copyOf(playedPowers[player]);
     }
 
     public synchronized String globalModifierId() {
@@ -230,10 +199,6 @@ public final class GameEngine {
         globalModifierId = GlobalModifiers.all().get(random.nextInt(GlobalModifiers.all().size())).id();
         hp[PLAYER_ONE] = rules.startingHp();
         hp[PLAYER_TWO] = rules.startingHp();
-        coins[PLAYER_ONE] = rules.startingCoins();
-        coins[PLAYER_TWO] = rules.startingCoins();
-        lossStreak[PLAYER_ONE] = 0;
-        lossStreak[PLAYER_TWO] = 0;
         round = 1;
         firstResolver = firstResolverFor(round);
         winner = 0;
@@ -242,11 +207,10 @@ public final class GameEngine {
         phase = GamePhase.BUILD;
         currentPlayer = PLAYER_ONE;
         log("GLOBAL|" + globalModifierId, STYLE_NORMAL);
-        log("MOEDAS|1=" + coins[PLAYER_ONE] + "|2=" + coins[PLAYER_TWO], STYLE_NORMAL);
         touch();
     }
 
-    /** Envia as duas cartas que um jogador deseja jogar nesta rodada. */
+    /** Envia as cinco cartas que um jogador deseja jogar nesta rodada. */
     public synchronized void submitPlay(int player, List<Card> cards) {
         ensurePlayer(player);
         requirePhase(GamePhase.BUILD);
@@ -266,49 +230,63 @@ public final class GameEngine {
         }
 
         pendingCards[player] = List.copyOf(cards);
+        hands[player].removeAll(cards);
         log("SUBMIT|" + player + "|" + codes(cards), STYLE_NORMAL);
 
         if (player == PLAYER_ONE) {
             currentPlayer = PLAYER_TWO;
         } else {
-            openTable();
-            phase = GamePhase.SABOTAGE;
-            currentPlayer = 0;
-            sabotageChosen[PLAYER_ONE] = false;
-            sabotageChosen[PLAYER_TWO] = false;
-            chosenSabotage[PLAYER_ONE] = null;
-            chosenSabotage[PLAYER_TWO] = null;
-            log("MESA|" + codes(community), STYLE_NORMAL);
+            scoreTableHands();
+            dealPowers();
+            if (rules.jokersPerRound() == 0 && rules.sabotagesPerRound() == 0) {
+                resolveRound();
+            } else {
+                phase = GamePhase.SABOTAGE;
+                currentPlayer = 0;
+            }
         }
         touch();
     }
 
-    /** Usa a sabotagem de índice {@code handIndex}; índice -1 equivale a passar. */
-    public synchronized void useSabotage(int player, int handIndex) {
+    /**
+     * Pontuação de mesa: as cinco cartas enviadas com o modificador global da rodada, sem poderes.
+     * É o valor mostrado ao lado de cada mão assim que as duas são enviadas.
+     */
+    private void scoreTableHands() {
+        tableScores[PLAYER_ONE] = scoringEngine.score(pendingCards[PLAYER_ONE], List.of(),
+                globalModifierId);
+        tableScores[PLAYER_TWO] = scoringEngine.score(pendingCards[PLAYER_TWO], List.of(),
+                globalModifierId);
+    }
+
+    /**
+     * Trava os poderes do jogador. A lista vazia significa "não jogar nada"; índices repetidos ou
+     * fora do intervalo são rejeitados, assim como mais de {@code maxPowersPlayed} cartas. Quando
+     * os dois jogadores travam, a rodada é resolvida.
+     */
+    public synchronized void lockPowers(int player, List<Integer> powerIndices) {
         ensurePlayer(player);
         requirePhase(GamePhase.SABOTAGE);
-        if (sabotageChosen[player]) {
-            throw new GameRuleException("ALREADY_CHOSEN", "Você já escolheu sua sabotagem nesta rodada");
+        if (powersLocked[player]) {
+            throw new GameRuleException("ALREADY_LOCKED", "Você já travou seus poderes nesta rodada");
         }
-        String id = null;
-        if (handIndex >= 0) {
-            if (handIndex >= sabotageHands[player].size()) {
-                throw new GameRuleException("INVALID_SABOTAGE", "Índice de sabotagem fora do intervalo");
-            }
-            id = sabotageHands[player].get(handIndex);
+        List<Integer> indices = powerIndices == null ? List.of() : List.copyOf(powerIndices);
+        validatePowerIndices(indices, powerHands[player].size());
+        if (indices.size() > rules.maxPowersPlayed()) {
+            throw new GameRuleException("TOO_MANY_POWERS",
+                    "Você pode jogar no máximo " + rules.maxPowersPlayed() + " poderes por rodada");
         }
-        chosenSabotage[player] = id;
-        sabotageChosen[player] = true;
-        log(id == null ? "PASS|" + player : "CHOOSE_SABOTAGE|" + player + "|" + id, STYLE_DRAFT);
-        if (sabotageChosen[PLAYER_ONE] && sabotageChosen[PLAYER_TWO]) {
+
+        List<Integer> ascending = new ArrayList<>(indices);
+        Collections.sort(ascending);
+        playedPowers[player] = ascending.stream().map(powerHands[player]::get).toList();
+        powersLocked[player] = true;
+        log("LOCK|" + player, STYLE_SYSTEM);
+
+        if (powersLocked[PLAYER_ONE] && powersLocked[PLAYER_TWO]) {
             resolveRound();
         }
         touch();
-    }
-
-    /** Passa a vez de sabotagem sem gastar nenhuma carta. */
-    public synchronized void passSabotage(int player) {
-        useSabotage(player, -1);
     }
 
     /** Marca a tela de revelação como confirmada. Quando ambos estão prontos, a partida avança. */
@@ -322,91 +300,8 @@ public final class GameEngine {
                 currentPlayer = 0;
                 winner = hp[PLAYER_ONE] > 0 ? PLAYER_ONE : PLAYER_TWO;
             } else {
-                startShop();
+                beginNextRound();
             }
-        }
-        touch();
-    }
-
-    /** Escolhe um dos três curingas oferecidos na loja. A escolha não encerra a loja sozinha. */
-    public synchronized void pickJoker(int player, int offerIndex) {
-        ensurePlayer(player);
-        requirePhase(GamePhase.SHOP);
-        if (jokerPicked[player]) {
-            throw new GameRuleException("ALREADY_PICKED", "Você já escolheu um joker nesta loja");
-        }
-        List<String> available = offers[player];
-        if (offerIndex < 0 || offerIndex >= available.size()) {
-            throw new GameRuleException("INVALID_OFFER", "Índice de oferta fora do intervalo");
-        }
-        String id = available.get(offerIndex);
-        jokers[player].add(id);
-        jokerPicked[player] = true;
-        log("DRAFT|" + player + "|" + id, STYLE_DRAFT);
-        touch();
-    }
-
-    /**
-     * Rerrola as três ofertas de joker do jogador. Usa primeiro os rerolls grátis da partida; depois
-     * cobra moedas, com preço crescente a cada atualização na mesma visita à loja.
-     */
-    public synchronized void reroll(int player) {
-        ensurePlayer(player);
-        requirePhase(GamePhase.SHOP);
-        if (jokerPicked[player]) {
-            throw new GameRuleException("ALREADY_PICKED", "Você já escolheu um joker nesta loja");
-        }
-        if (rerolls[player] > 0) {
-            rerolls[player]--;
-            offers[player] = generateJokerOffer();
-            log("REROLL|" + player + "|restam=" + rerolls[player], STYLE_DRAFT);
-            touch();
-            return;
-        }
-        int cost = nextRerollCost(player);
-        if (coins[player] < cost) {
-            throw new GameRuleException("NO_COINS", "Moedas insuficientes para rerrolar (custo " + cost + ")");
-        }
-        coins[player] -= cost;
-        paidRerolls[player]++;
-        offers[player] = generateJokerOffer();
-        log("REROLL_PAGO|" + player + "|custo=" + cost + "|moedas=" + coins[player], STYLE_DRAFT);
-        touch();
-    }
-
-    /** Compra a sabotagem oferecida no índice indicado. */
-    public synchronized void buySabotage(int player, int offerIndex) {
-        ensurePlayer(player);
-        requirePhase(GamePhase.SHOP);
-        if (offerIndex < 0 || offerIndex >= sabotageOffers[player].size()) {
-            throw new GameRuleException("INVALID_SABOTAGE", "Índice de sabotagem fora do intervalo");
-        }
-        if (sabotageHands[player].size() >= rules.maxSabotages()) {
-            throw new GameRuleException("SABOTAGE_HAND_FULL",
-                    "Limite de " + rules.maxSabotages() + " sabotagens em mãos");
-        }
-        int price = rules.sabotagePrice();
-        if (coins[player] < price) {
-            throw new GameRuleException("NO_COINS", "Moedas insuficientes (custo " + price + ")");
-        }
-        String id = sabotageOffers[player].get(offerIndex);
-        coins[player] -= price;
-        sabotageHands[player].add(id);
-        log("BUY|" + player + "|" + id + "|preco=" + price + "|moedas=" + coins[player], STYLE_DRAFT);
-        touch();
-    }
-
-    /** Confirma que o jogador terminou as compras e já escolheu o joker da rodada. */
-    public synchronized void ready(int player) {
-        ensurePlayer(player);
-        requirePhase(GamePhase.SHOP);
-        if (!jokerPicked[player]) {
-            throw new GameRuleException("PICK_JOKER_FIRST", "Escolha um joker antes de continuar");
-        }
-        shopReady[player] = true;
-        log("PRONTO|" + player, STYLE_DRAFT);
-        if (shopReady[PLAYER_ONE] && shopReady[PLAYER_TWO]) {
-            startNextRound();
         }
         touch();
     }
@@ -423,6 +318,20 @@ public final class GameEngine {
         touch();
     }
 
+    /**
+     * Apenas para o DevPreview: redistribui a mão de poderes do jogador enquanto ele ainda não
+     * travou. Não faz parte do protocolo de rede.
+     */
+    public synchronized void redealPowersForPreview(int player) {
+        ensurePlayer(player);
+        if (phase != GamePhase.SABOTAGE || powersLocked[player]) {
+            return;
+        }
+        powerHands[player] = drawPowerHand();
+        playedPowers[player] = List.of();
+        touch();
+    }
+
     /** Instantâneo com visibilidade total, usado pelos testes e pela sessão local de um jogador. */
     public synchronized GameSnapshot snapshotFor(int viewer) {
         return buildSnapshot(viewer);
@@ -434,93 +343,180 @@ public final class GameEngine {
 
     // ------------------------------------------------------------------ rotinas internas
 
-    private void resolveRound() {
-        log("ORDEM|" + round + "|" + firstResolver, STYLE_DRAFT);
-        ScoreModifiers[] modifiers = {ScoreModifiers.NONE, ScoreModifiers.NONE, ScoreModifiers.NONE};
-        int second = firstResolver == PLAYER_ONE ? PLAYER_TWO : PLAYER_ONE;
-        applySabotage(firstResolver, modifiers);
-        applySabotage(second, modifiers);
+    private static void validatePowerIndices(List<Integer> indices, int size) {
+        Set<Integer> distinct = new HashSet<>();
+        for (Integer index : indices) {
+            if (index == null || index < 0 || index >= size || !distinct.add(index)) {
+                throw new GameRuleException("INVALID_POWER", "Índice de poder inválido: " + index);
+            }
+        }
+    }
 
-        ScoreResult score1 = scoringEngine.score(combine(pendingCards[PLAYER_ONE]),
-                jokers[PLAYER_ONE], globalModifierId, modifiers[PLAYER_ONE]);
-        ScoreResult score2 = scoringEngine.score(combine(pendingCards[PLAYER_TWO]),
-                jokers[PLAYER_TWO], globalModifierId, modifiers[PLAYER_TWO]);
+    private void dealPowers() {
+        for (int player : new int[]{PLAYER_ONE, PLAYER_TWO}) {
+            powerHands[player] = drawPowerHand();
+            playedPowers[player] = List.of();
+            powersLocked[player] = false;
+        }
+    }
+
+    /**
+     * Monta a mão de poderes como UMA lista: os jokers e as sabotagens sorteados são combinados e
+     * embaralhados juntos, nunca agrupados por tipo. O resultado é determinístico para uma semente.
+     */
+    private List<PowerCard> drawPowerHand() {
+        List<PowerCard> hand = new ArrayList<>();
+        for (String id : drawDistinct(Jokers.ids(), rules.jokersPerRound())) {
+            hand.add(new PowerCard(PowerKind.JOKER, id));
+        }
+        for (String id : drawDistinct(Sabotages.ids(), rules.sabotagesPerRound())) {
+            hand.add(new PowerCard(PowerKind.SABOTAGE, id));
+        }
+        boolean bothKinds = hand.stream().anyMatch(card -> card.kind() == PowerKind.JOKER)
+                && hand.stream().anyMatch(card -> card.kind() == PowerKind.SABOTAGE);
+        if (bothKinds) {
+            for (int attempt = 0; attempt < 64; attempt++) {
+                shuffle(hand);
+                if (!groupedByKind(hand)) {
+                    break;
+                }
+            }
+        } else {
+            shuffle(hand);
+        }
+        return new ArrayList<>(hand);
+    }
+
+    /** Verdadeiro quando a lista tem no máximo uma troca de tipo (isto é, está agrupada). */
+    private static boolean groupedByKind(List<PowerCard> cards) {
+        int switches = 0;
+        for (int i = 1; i < cards.size(); i++) {
+            if (cards.get(i).kind() != cards.get(i - 1).kind()) {
+                switches++;
+            }
+        }
+        return switches <= 1;
+    }
+
+    private <T> List<T> drawDistinct(List<T> pool, int count) {
+        List<T> copy = new ArrayList<>(pool);
+        shuffle(copy);
+        return new ArrayList<>(copy.subList(0, Math.min(count, copy.size())));
+    }
+
+    private void resolveRound() {
+        log("ORDEM|" + round + "|" + firstResolver, STYLE_SYSTEM);
+        ScoreModifiers[] modifiers = {ScoreModifiers.NONE, ScoreModifiers.NONE, ScoreModifiers.NONE};
+        List<PowerEvent> events = new ArrayList<>();
+        int second = firstResolver == PLAYER_ONE ? PLAYER_TWO : PLAYER_ONE;
+        applyPowers(firstResolver, modifiers, events);
+        applyPowers(second, modifiers, events);
+
+        ScoreResult score1 = scoringEngine.score(pendingCards[PLAYER_ONE],
+                jokerIds(PLAYER_ONE), globalModifierId, modifiers[PLAYER_ONE],
+                sabotageIdsAgainst(PLAYER_ONE));
+        ScoreResult score2 = scoringEngine.score(pendingCards[PLAYER_TWO],
+                jokerIds(PLAYER_TWO), globalModifierId, modifiers[PLAYER_TWO],
+                sabotageIdsAgainst(PLAYER_TWO));
 
         RoundOutcome outcome = CombatResolver.resolve(round, score1, score2,
-                pendingCards[PLAYER_ONE], pendingCards[PLAYER_TWO], community, rules);
+                pendingCards[PLAYER_ONE], pendingCards[PLAYER_TWO],
+                playedPowers[PLAYER_ONE], playedPowers[PLAYER_TWO], events, rules);
         lastOutcome = outcome;
         if (outcome.winner() != 0) {
             hp[outcome.loser()] -= outcome.damage();
         }
-        applyEconomy(outcome);
 
         log("RESULT|vencedor=" + (outcome.winner() == 0 ? "empate" : outcome.winner())
                 + "|p1=" + outcome.player1Score().finalScore()
                 + "|p2=" + outcome.player2Score().finalScore()
                 + "|dano=" + outcome.damage(), STYLE_RESULT);
         log("HP|1=" + Math.max(0, hp[PLAYER_ONE]) + "|2=" + Math.max(0, hp[PLAYER_TWO]), STYLE_RESULT);
-        log("COINS|1=" + coins[PLAYER_ONE] + "|2=" + coins[PLAYER_TWO], STYLE_RESULT);
         if (hp[PLAYER_ONE] <= 0 || hp[PLAYER_TWO] <= 0) {
             log("FIM|vencedor=" + (hp[PLAYER_ONE] > 0 ? PLAYER_ONE : PLAYER_TWO), STYLE_GAME_OVER);
         }
+
+        // Poderes não usados são descartados ao fim da rodada; os jogados ficam para a revelação.
+        powerHands[PLAYER_ONE] = new ArrayList<>();
+        powerHands[PLAYER_TWO] = new ArrayList<>();
+
         phase = GamePhase.REVEAL;
         currentPlayer = 0;
         ready[PLAYER_ONE] = false;
         ready[PLAYER_TWO] = false;
     }
 
-    private void applySabotage(int player, ScoreModifiers[] modifiers) {
-        String id = chosenSabotage[player];
-        if (id == null) {
-            return;
+    private List<String> jokerIds(int player) {
+        List<String> ids = new ArrayList<>();
+        for (PowerCard card : playedPowers[player]) {
+            if (card.kind() == PowerKind.JOKER) {
+                ids.add(card.id());
+            }
         }
+        return ids;
+    }
+
+    /** Sabotagens jogadas pelo oponente, na ordem da mão, que afetam este jogador. */
+    private List<String> sabotageIdsAgainst(int player) {
         int opponent = player == PLAYER_ONE ? PLAYER_TWO : PLAYER_ONE;
-        sabotageHands[player].remove(id); // uso único: comprou, usou, acabou
-        log("SABOTAGE|" + player + "|" + id, STYLE_DRAFT);
+        List<String> ids = new ArrayList<>();
+        for (PowerCard card : playedPowers[opponent]) {
+            if (card.kind() == PowerKind.SABOTAGE) {
+                ids.add(card.id());
+            }
+        }
+        return ids;
+    }
+
+    private void applyPowers(int player, ScoreModifiers[] modifiers, List<PowerEvent> events) {
+        int opponent = player == PLAYER_ONE ? PLAYER_TWO : PLAYER_ONE;
+        for (PowerCard card : playedPowers[player]) {
+            if (card.kind() == PowerKind.SABOTAGE) {
+                events.add(applySabotage(player, opponent, card.id(), modifiers));
+            } else {
+                events.add(new PowerEvent(player, PowerKind.JOKER, card.id(), player, null, null));
+            }
+        }
+        List<String> jokers = jokerIds(player);
+        if (!jokers.isEmpty()) {
+            log("JOKERS|" + player + "|" + String.join(",", jokers), STYLE_SYSTEM);
+        }
+    }
+
+    private PowerEvent applySabotage(int player, int opponent, String id,
+                                     ScoreModifiers[] modifiers) {
+        log("SABOTAGE|" + player + "|" + id, STYLE_SYSTEM);
+        List<Card> before = pendingCards[opponent] == null
+                ? null : List.copyOf(pendingCards[opponent]);
         switch (id) {
             case "anti_flush" -> modifiers[opponent] = modifiers[opponent].withBlockFlush();
             case "peso_chumbo" -> modifiers[opponent] = modifiers[opponent].withMultPenalty(5);
             case "imposto_par" -> modifiers[opponent] = modifiers[opponent].withPairTax();
-            case "bloqueio_joker" -> {
-                if (!jokers[opponent].isEmpty()) {
-                    modifiers[opponent] = modifiers[opponent].withDisabledJoker(0);
-                    log("JOKER_BLOQUEADO|" + opponent + "|" + jokers[opponent].get(0), STYLE_DRAFT);
-                }
-            }
             case "nevoa" -> modifiers[opponent] = modifiers[opponent].withNullifyJokers();
-            case "virada_naipes" -> flipTableSuits();
-            case "troca_river" -> replaceRiver();
+            case "virada_naipes" -> flipPlayedSuits(opponent);
+            case "troca_carta" -> swapPlayedCard(opponent);
             default -> {
                 // Sabotagem desconhecida: não faz nada, mas continua registrada no log.
             }
         }
+        List<Card> after = pendingCards[opponent] == null
+                ? null : List.copyOf(pendingCards[opponent]);
+        boolean changed = before != null && !before.equals(after);
+        return new PowerEvent(player, PowerKind.SABOTAGE, id, opponent,
+                changed ? before : null, changed ? after : null);
     }
 
-    private void applyEconomy(RoundOutcome outcome) {
-        coins[PLAYER_ONE] += rules.roundCoins();
-        coins[PLAYER_TWO] += rules.roundCoins();
-        if (outcome.winner() == 0) {
+    private void flipPlayedSuits(int opponent) {
+        List<Card> played = pendingCards[opponent];
+        if (played == null || played.isEmpty()) {
             return;
         }
-        int loser = outcome.loser();
-        int winnerPlayer = outcome.winner();
-        coins[winnerPlayer] += rules.winnerBonusCoins();
-        lossStreak[winnerPlayer] = 0;
-        lossStreak[loser]++;
-        if (lossStreak[loser] >= 2) {
-            coins[loser] += rules.underdogBonusCoins();
-            log("AZARAO|" + loser + "|sequencia=" + lossStreak[loser]
-                    + "|bonus=" + rules.underdogBonusCoins(), STYLE_RESULT);
-        }
-    }
-
-    private void flipTableSuits() {
-        List<Card> flipped = new ArrayList<>(community.size());
-        for (Card card : community) {
+        List<Card> flipped = new ArrayList<>(played.size());
+        for (Card card : played) {
             flipped.add(new Card(card.rank(), mirrorSuit(card.suit())));
         }
-        community = List.copyOf(flipped);
-        log("MESA_REESCRITA|" + codes(community), STYLE_DRAFT);
+        pendingCards[opponent] = List.copyOf(flipped);
+        log("NIAPES|" + opponent + "|" + codes(played) + "->" + codes(flipped), STYLE_SYSTEM);
     }
 
     private static Suit mirrorSuit(Suit suit) {
@@ -532,16 +528,18 @@ public final class GameEngine {
         };
     }
 
-    private void replaceRiver() {
-        if (community.size() < 5) {
+    private void swapPlayedCard(int opponent) {
+        List<Card> played = pendingCards[opponent];
+        if (played == null || played.isEmpty()) {
             return;
         }
-        Card old = community.get(4);
+        int index = random.nextInt(played.size());
+        Card old = played.get(index);
         Card replacement = drawCard();
-        List<Card> updated = new ArrayList<>(community);
-        updated.set(4, replacement);
-        community = List.copyOf(updated);
-        log("RIVER|" + old.code() + "|" + replacement.code(), STYLE_DRAFT);
+        List<Card> updated = new ArrayList<>(played);
+        updated.set(index, replacement);
+        pendingCards[opponent] = List.copyOf(updated);
+        log("TROCA_CARTA|" + opponent + "|" + old.code() + "->" + replacement.code(), STYLE_SYSTEM);
     }
 
     private Card drawCard() {
@@ -553,56 +551,19 @@ public final class GameEngine {
         return card;
     }
 
-    private List<Card> combine(List<Card> played) {
-        List<Card> pool = new ArrayList<>();
-        if (played != null) {
-            pool.addAll(played);
-        }
-        pool.addAll(community);
-        return pool;
-    }
-
-    private void startShop() {
-        List<String> jokerOffer = generateJokerOffer();
-        offers[PLAYER_ONE] = new ArrayList<>(jokerOffer);
-        offers[PLAYER_TWO] = new ArrayList<>(jokerOffer);
-        List<String> sabotageOffer = generateSabotageOffer();
-        sabotageOffers[PLAYER_ONE] = new ArrayList<>(sabotageOffer);
-        sabotageOffers[PLAYER_TWO] = new ArrayList<>(sabotageOffer);
-        shopReady[PLAYER_ONE] = false;
-        shopReady[PLAYER_TWO] = false;
-        jokerPicked[PLAYER_ONE] = false;
-        jokerPicked[PLAYER_TWO] = false;
-        paidRerolls[PLAYER_ONE] = 0;
-        paidRerolls[PLAYER_TWO] = 0;
-        phase = GamePhase.SHOP;
-        currentPlayer = 0;
-        log("SHOP_OFFER|" + String.join(",", jokerOffer) + "|" + String.join(",", sabotageOffer),
-                STYLE_DRAFT);
-    }
-
-    private void startNextRound() {
+    private void beginNextRound() {
         round++;
         firstResolver = firstResolverFor(round);
-        offers[PLAYER_ONE] = new ArrayList<>();
-        offers[PLAYER_TWO] = new ArrayList<>();
-        sabotageOffers[PLAYER_ONE] = new ArrayList<>();
-        sabotageOffers[PLAYER_TWO] = new ArrayList<>();
         ready[PLAYER_ONE] = false;
         ready[PLAYER_TWO] = false;
-        shopReady[PLAYER_ONE] = false;
-        shopReady[PLAYER_TWO] = false;
-        jokerPicked[PLAYER_ONE] = false;
-        jokerPicked[PLAYER_TWO] = false;
-        sabotageChosen[PLAYER_ONE] = false;
-        sabotageChosen[PLAYER_TWO] = false;
-        chosenSabotage[PLAYER_ONE] = null;
-        chosenSabotage[PLAYER_TWO] = null;
-        paidRerolls[PLAYER_ONE] = 0;
-        paidRerolls[PLAYER_TWO] = 0;
+        powersLocked[PLAYER_ONE] = false;
+        powersLocked[PLAYER_TWO] = false;
+        playedPowers[PLAYER_ONE] = List.of();
+        playedPowers[PLAYER_TWO] = List.of();
         pendingCards[PLAYER_ONE] = null;
         pendingCards[PLAYER_TWO] = null;
-        community = List.of();
+        tableScores[PLAYER_ONE] = null;
+        tableScores[PLAYER_TWO] = null;
         dealRound();
         phase = GamePhase.BUILD;
         currentPlayer = PLAYER_ONE;
@@ -615,37 +576,10 @@ public final class GameEngine {
         hands[PLAYER_TWO] = new ArrayList<>(
                 deck.subList(rules.handSize(), rules.handSize() * 2));
         drawPile = new ArrayList<>(deck.subList(rules.handSize() * 2, deck.size()));
-        community = List.of();
-    }
-
-    /** Abre as cartas comunitárias do baralho restante (flop, turn e river). */
-    private void openTable() {
-        int size = Math.min(rules.communitySize(), drawPile.size());
-        community = List.copyOf(drawPile.subList(0, size));
-        drawPile = new ArrayList<>(drawPile.subList(size, drawPile.size()));
     }
 
     private int firstResolverFor(int roundNumber) {
         return roundNumber % 2 == 1 ? PLAYER_ONE : PLAYER_TWO;
-    }
-
-    private int nextRerollCost(int player) {
-        if (rerolls[player] > 0) {
-            return 0;
-        }
-        return rules.paidRerollBaseCost() + rules.paidRerollIncrement() * paidRerolls[player];
-    }
-
-    private List<String> generateJokerOffer() {
-        List<String> pool = new ArrayList<>(Jokers.ids());
-        shuffle(pool);
-        return new ArrayList<>(pool.subList(0, Math.min(3, pool.size())));
-    }
-
-    private List<String> generateSabotageOffer() {
-        List<String> pool = new ArrayList<>(Sabotages.ids());
-        shuffle(pool);
-        return new ArrayList<>(pool.subList(0, Math.min(3, pool.size())));
     }
 
     private <T> void shuffle(List<T> pool) {
@@ -658,9 +592,7 @@ public final class GameEngine {
     }
 
     private GameSnapshot buildSnapshot(int viewer) {
-        boolean handVisible = phase == GamePhase.BUILD || phase == GamePhase.SABOTAGE
-                || phase == GamePhase.SHOP;
-        boolean revealCards = phase == GamePhase.REVEAL || phase == GamePhase.GAME_OVER;
+        boolean handVisible = phase == GamePhase.BUILD || phase == GamePhase.SABOTAGE;
         GlobalModifierDef global = GlobalModifiers.byId(globalModifierId);
         return new GameSnapshot(
                 sessionId,
@@ -672,52 +604,43 @@ public final class GameEngine {
                 globalModifierId,
                 global == null ? "" : global.name(),
                 global == null ? "" : global.description(),
-                List.copyOf(community),
                 firstResolver,
-                buildPlayerView(PLAYER_ONE, viewer, handVisible, revealCards),
-                buildPlayerView(PLAYER_TWO, viewer, handVisible, revealCards),
+                buildPlayerView(PLAYER_ONE, viewer, handVisible),
+                buildPlayerView(PLAYER_TWO, viewer, handVisible),
                 lastOutcome,
                 winner,
                 List.copyOf(log)
         );
     }
 
-    private PlayerView buildPlayerView(int player, int viewer, boolean handVisible, boolean revealCards) {
+    private PlayerView buildPlayerView(int player, int viewer, boolean handVisible) {
         boolean own = viewer == OBSERVER || viewer == player;
+        boolean bothSubmitted = phase == GamePhase.SABOTAGE || phase == GamePhase.REVEAL;
         List<Card> visibleHand = own && handVisible ? List.copyOf(hands[player]) : List.of();
-        List<Card> played = List.of();
-        if (revealCards && lastOutcome != null) {
-            played = player == PLAYER_ONE ? lastOutcome.player1Cards() : lastOutcome.player2Cards();
-        }
-        List<String> visibleOffers = own && phase == GamePhase.SHOP
-                ? List.copyOf(offers[player]) : List.of();
-        List<String> visibleSabotageOffers = own && phase == GamePhase.SHOP
-                ? List.copyOf(sabotageOffers[player]) : List.of();
-        List<String> visibleSabotageHand = own ? List.copyOf(sabotageHands[player]) : List.of();
+        boolean playedVisible = pendingCards[player] != null && (own || bothSubmitted);
+        List<Card> visiblePlayed = playedVisible ? List.copyOf(pendingCards[player]) : List.of();
+        boolean powersVisible = own && phase == GamePhase.SABOTAGE;
+        List<PowerCard> visiblePowerHand = powersVisible
+                ? List.copyOf(powerHands[player]) : List.of();
+        boolean playedPowersVisible = phase == GamePhase.REVEAL || phase == GamePhase.GAME_OVER;
+        List<PowerCard> visiblePlayedPowers = playedPowersVisible
+                ? List.copyOf(playedPowers[player]) : List.of();
+        ScoreResult visibleTableScore = bothSubmitted ? tableScores[player] : null;
         return new PlayerView(
                 player,
                 playerNames[player],
                 Math.max(0, hp[player]),
                 rules.startingHp(),
                 hands[player].size(),
-                handVisible && own,
                 visibleHand,
-                played,
                 pendingCards[player] != null,
-                List.copyOf(jokers[player]),
-                visibleOffers,
-                rerolls[player],
-                nextRerollCost(player),
-                coins[player],
-                lossStreak[player],
-                visibleSabotageHand,
-                sabotageHands[player].size(),
-                visibleSabotageOffers,
-                sabotageChosen[player],
-                jokerPicked[player],
-                shopReady[player],
-                ready[player],
-                rematch[player]
+                visiblePlayed,
+                visibleTableScore,
+                visiblePowerHand,
+                powerHands[player].size(),
+                visiblePlayedPowers,
+                powersLocked[player],
+                ready[player]
         );
     }
 

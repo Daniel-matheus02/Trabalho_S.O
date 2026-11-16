@@ -43,10 +43,32 @@ class MessageCodecTest {
         assertEquals(snapshot.phase(), restored.phase());
         assertEquals(snapshot.round(), restored.round());
         assertEquals(snapshot.player1().hand(), restored.player1().hand());
-        assertEquals(snapshot.player1().jokers(), restored.player1().jokers());
+        assertEquals(snapshot.player1().playedCards(), restored.player1().playedCards());
+        assertEquals(snapshot.player1().powerCount(), restored.player1().powerCount());
+        assertEquals(snapshot.player1().powerHand(), restored.player1().powerHand());
+        assertEquals(snapshot.player1().playedPowers(), restored.player1().playedPowers());
         assertEquals(snapshot.globalModifierId(), restored.globalModifierId());
         assertEquals(snapshot.rules(), restored.rules());
         assertEquals(8, restored.player1().hand().size());
+    }
+
+    @Test
+    void roundTripsTableScores() {
+        GameEngine engine = new GameEngine("table", "Ana", "Beto");
+        engine.start();
+        engine.submitPlay(1, engine.handOf(1).subList(0, 5));
+        engine.submitPlay(2, engine.handOf(2).subList(0, 5));
+        GameSnapshot snapshot = engine.snapshotFor(1);
+
+        Envelope envelope = codec.message(MessageType.GAME_STATE_UPDATE, "table", 1,
+                new StatePayload(snapshot));
+        GameSnapshot restored = codec.payload(codec.decode(codec.encode(envelope)),
+                StatePayload.class).snapshot();
+
+        assertNotNull(restored.player1().tableScore());
+        assertEquals(snapshot.player1().tableScore(), restored.player1().tableScore());
+        assertEquals(snapshot.player2().tableScore(), restored.player2().tableScore());
+        assertEquals(snapshot.player2().playedCards(), restored.player2().playedCards());
     }
 
     @Test
@@ -56,6 +78,13 @@ class MessageCodecTest {
         ActionPayload action = codec.payload(codec.decode(codec.encode(play)), ActionPayload.class);
         assertEquals(com.game.net.protocol.ActionType.SUBMIT_PLAY, action.action());
         assertEquals(List.of("AE", "TC"), action.cards());
+
+        Envelope powers = codec.message(MessageType.PLAYER_ACTION, "s", 2,
+                ActionPayload.lockPowers(List.of(0, 2)));
+        ActionPayload locked = codec.payload(codec.decode(codec.encode(powers)), ActionPayload.class);
+        assertEquals(com.game.net.protocol.ActionType.LOCK_POWERS, locked.action());
+        assertEquals(List.of(0, 2), locked.powerIndices());
+        assertTrue(locked.cards().isEmpty());
 
         Envelope error = codec.error("s", 0, "BAD", "broken");
         ErrorPayload payload = codec.payload(codec.decode(codec.encode(error)), ErrorPayload.class);
@@ -103,14 +132,55 @@ class MessageCodecTest {
     }
 
     @Test
+    void powerEventsWithCardChangesRoundTrip() {
+        com.game.core.rules.RoundOutcome outcome = null;
+        for (int seed = 0; seed < 300 && outcome == null; seed++) {
+            GameEngine engine = new GameEngine("ev-" + seed, "A", "B",
+                    new java.util.Random(seed), com.game.core.rules.GameRules.DEFAULT,
+                    new ScoringEngine());
+            engine.start();
+            engine.submitPlay(1, engine.handOf(1).subList(0, 5));
+            engine.submitPlay(2, engine.handOf(2).subList(0, 5));
+            List<com.game.core.model.PowerCard> hand = engine.powerHandOf(1);
+            int index = -1;
+            for (int i = 0; i < hand.size(); i++) {
+                String id = hand.get(i).id();
+                if (id.equals("virada_naipes") || id.equals("troca_carta")) {
+                    index = i;
+                    break;
+                }
+            }
+            if (index < 0) {
+                continue;
+            }
+            engine.lockPowers(1, List.of(index));
+            engine.lockPowers(2, List.of());
+            outcome = engine.snapshot().lastOutcome();
+        }
+        assertNotNull(outcome, "uma semente deve oferecer sabotagem de mesa");
+        Envelope envelope = codec.message(MessageType.ROUND_RESULT, "s", 1,
+                new com.game.net.protocol.RoundResultPayload(outcome, 300, 300));
+        var payload = codec.payload(codec.decode(codec.encode(envelope)),
+                com.game.net.protocol.RoundResultPayload.class);
+        assertEquals(1, payload.outcome().powerEvents().size());
+        var originalEvent = outcome.powerEvents().get(0);
+        var restoredEvent = payload.outcome().powerEvents().get(0);
+        assertEquals(originalEvent.kind(), restoredEvent.kind());
+        assertEquals(originalEvent.id(), restoredEvent.id());
+        assertEquals(originalEvent.targetPlayer(), restoredEvent.targetPlayer());
+        assertEquals(originalEvent.cardsBefore(), restoredEvent.cardsBefore());
+        assertEquals(originalEvent.cardsAfter(), restoredEvent.cardsAfter());
+    }
+
+    @Test
     void scoringEngineIsSerializableThroughRuntimeSnapshots() {
         GameEngine engine = new GameEngine("s", "A", "B", new java.util.Random(5),
                 com.game.core.rules.GameRules.DEFAULT, new ScoringEngine());
         engine.start();
-        engine.submitPlay(1, engine.handOf(1).subList(0, 2));
-        engine.submitPlay(2, engine.handOf(2).subList(0, 2));
-        engine.passSabotage(1);
-        engine.passSabotage(2);
+        engine.submitPlay(1, engine.handOf(1).subList(0, 5));
+        engine.submitPlay(2, engine.handOf(2).subList(0, 5));
+        engine.lockPowers(1, List.of());
+        engine.lockPowers(2, List.of());
         Envelope envelope = codec.message(MessageType.ROUND_RESULT, "s", 1,
                 new com.game.net.protocol.RoundResultPayload(engine.snapshot().lastOutcome(), 300, 300));
         var payload = codec.payload(codec.decode(codec.encode(envelope)),

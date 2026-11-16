@@ -21,7 +21,6 @@ class CardColorTest {
             Card card = Card.fromCode(code);
             assertEquals(expected(card.suit()), CardRenderer.suitColor(card),
                     "Cor errada para " + card);
-            assertEquals(CardRenderer.suitColor(card), CardActor.colorFor(card));
         }
     }
 

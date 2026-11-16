@@ -106,6 +106,7 @@ public abstract class BaseScreen extends ScreenAdapter {
         layoutTree(stage.getRoot());
         List<String> problems = new ArrayList<>();
         collectOverflow(stage.getRoot(), true, width, problems);
+        collectOverlaps(stage.getRoot(), problems);
         return problems;
     }
 
@@ -145,6 +146,61 @@ public abstract class BaseScreen extends ScreenAdapter {
                 collectOverflow(child, true, width, problems);
             }
         }
+    }
+
+    /**
+     * QA: dois controles interativos (botões e cartas) não podem ocupar a mesma área. É assim que
+     * a sobreposição entre o botão COMBINAÇÕES e a barra de ações é detectada.
+     */
+    private static void collectOverlaps(Actor root, List<String> problems) {
+        List<Actor> controls = new ArrayList<>();
+        collectControls(root, true, controls);
+        for (int i = 0; i < controls.size(); i++) {
+            for (int j = i + 1; j < controls.size(); j++) {
+                Actor a = controls.get(i);
+                Actor b = controls.get(j);
+                if (isAncestor(a, b) || isAncestor(b, a)) {
+                    continue;
+                }
+                Vector2 pa = a.localToStageCoordinates(new Vector2());
+                Vector2 pb = b.localToStageCoordinates(new Vector2());
+                float overlapX = Math.min(pa.x + a.getWidth(), pb.x + b.getWidth())
+                        - Math.max(pa.x, pb.x);
+                float overlapY = Math.min(pa.y + a.getHeight(), pb.y + b.getHeight())
+                        - Math.max(pa.y, pb.y);
+                if (overlapX > 3f && overlapY > 3f) {
+                    problems.add("OVERLAP " + a.getClass().getSimpleName()
+                            + "(" + Math.round(pa.x) + "," + Math.round(pa.y) + ")"
+                            + "/" + b.getClass().getSimpleName()
+                            + "(" + Math.round(pb.x) + "," + Math.round(pb.y) + ")");
+                }
+            }
+        }
+    }
+
+    private static void collectControls(Actor actor, boolean parentVisible, List<Actor> out) {
+        boolean visible = parentVisible && actor.isVisible() && actor.getColor().a > 0.01f;
+        if (!visible) {
+            return;
+        }
+        if (actor instanceof com.badlogic.gdx.scenes.scene2d.ui.Button
+                || actor instanceof com.game.rendering.CardActor) {
+            out.add(actor);
+        }
+        if (actor instanceof Group group) {
+            for (Actor child : group.getChildren()) {
+                collectControls(child, true, out);
+            }
+        }
+    }
+
+    private static boolean isAncestor(Actor possibleAncestor, Actor actor) {
+        for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
+            if (parent == possibleAncestor) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

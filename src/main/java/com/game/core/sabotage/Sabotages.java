@@ -5,40 +5,35 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Catálogo de sabotagens da v0.3/v0.4.
+ * Catálogo das seis sabotagens da rodada.
  *
- * <p>As sabotagens de mesa reescrevem o tabuleiro compartilhado; as de debuff afetam apenas a
- * pontuação do oponente na rodada. Todas são de uso único.</p>
+ * <p>As sabotagens de mesa reescrevem a jogada do oponente; as de debuff afetam apenas a
+ * pontuação do oponente na rodada.</p>
  */
 public final class Sabotages {
 
     private static final Map<String, SabotageDef> BY_ID = new LinkedHashMap<>();
 
     static {
-        register("anti_flush", "Anti-Flush",
-                "Anula o flush do oponente nesta rodada.", SabotageCategory.DEBUFF);
-        register("peso_chumbo", "Peso de Chumbo",
-                "O oponente perde 5 de mult nesta rodada.", SabotageCategory.DEBUFF);
-        register("imposto_par", "Imposto do Par",
-                "O oponente perde 25 fichas se a mão final tiver par ou melhor.",
-                SabotageCategory.DEBUFF);
-        register("bloqueio_joker", "Bloqueio de Joker",
-                "Desativa o primeiro joker do oponente nesta rodada.", SabotageCategory.DEBUFF);
-        register("nevoa", "Névoa",
-                "Anula todos os jokers do oponente nesta rodada.", SabotageCategory.DEBUFF);
-        register("virada_naipes", "Virada de Naipes",
-                "Inverte os naipes das 5 cartas da mesa (espadas↔copas, ouros↔paus).",
-                SabotageCategory.MESA);
-        register("troca_river", "Troca de River",
-                "Substitui a carta do river por uma nova carta do baralho.",
-                SabotageCategory.MESA);
+        register("anti_flush", "Panelinha?",
+                "Anula o flush do oponente nesta rodada.");
+        register("peso_chumbo", "Quer jogar? vai ter que pagar!",
+                "O oponente perde 5 de mult nesta rodada.");
+        register("imposto_par", "Nem meu, nem seu",
+                "O oponente perde 25 fichas se a mão final tiver par ou melhor.");
+        register("nevoa", "Sem graça!",
+                "Anula todos os jokers do oponente nesta rodada.");
+        register("virada_naipes", "Vira casaca",
+                "Inverte os naipes das 5 cartas da jogada do oponente (espadas↔copas, ouros↔paus).");
+        register("troca_carta", "ÁRBITRO???",
+                "Substitui uma carta aleatória da jogada do oponente por uma nova carta do baralho.");
     }
 
     private Sabotages() {
     }
 
-    private static void register(String id, String name, String description, SabotageCategory category) {
-        BY_ID.put(id, new SabotageDef(id, name, description, category));
+    private static void register(String id, String name, String description) {
+        BY_ID.put(id, new SabotageDef(id, name, description));
     }
 
     public static List<SabotageDef> all() {

@@ -103,7 +103,7 @@ class GameSessionTest {
         drain(ch2);
         assertEquals(1, state.currentPlayer());
 
-        List<String> codes = state.player(1).hand().subList(0, 2).stream()
+        List<String> codes = state.player(1).hand().subList(0, 5).stream()
                 .map(Card::code).toList();
         ActionPayload action = ActionPayload.play(codes);
         Envelope envelope = codec.message(MessageType.PLAYER_ACTION, session.sessionId(), 1, action);
@@ -151,9 +151,9 @@ class GameSessionTest {
         drain(ch1);
         GameSnapshot state = snapshotFrom(drain(ch2));
 
-        ActionPayload pick = ActionPayload.pickJoker(0);
-        Envelope envelope = codec.message(MessageType.PLAYER_ACTION, session.sessionId(), 1, pick);
-        session.handleAction(1, envelope, pick);
+        ActionPayload lock = ActionPayload.lockPowers(List.of(0));
+        Envelope envelope = codec.message(MessageType.PLAYER_ACTION, session.sessionId(), 1, lock);
+        session.handleAction(1, envelope, lock);
 
         List<Envelope> messages = drain(ch1);
         assertTrue(messages.stream().anyMatch(e -> e.type() == MessageType.ERROR));

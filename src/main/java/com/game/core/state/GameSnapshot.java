@@ -1,6 +1,5 @@
 package com.game.core.state;
 
-import com.game.core.model.Card;
 import com.game.core.rules.GameRules;
 import com.game.core.rules.RoundOutcome;
 
@@ -20,7 +19,6 @@ public record GameSnapshot(
         String globalModifierId,
         String globalModifierName,
         String globalModifierDescription,
-        List<Card> community,
         int firstResolver,
         PlayerView player1,
         PlayerView player2,
@@ -29,7 +27,6 @@ public record GameSnapshot(
         List<LogEntry> log
 ) {
     public GameSnapshot {
-        community = List.copyOf(community);
         log = List.copyOf(log);
     }
 

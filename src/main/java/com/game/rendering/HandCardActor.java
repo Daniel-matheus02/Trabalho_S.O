@@ -1,0 +1,192 @@
+package com.game.rendering;
+
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
+import com.game.assets.GameAssets;
+
+/**
+ * Comportamento comum das cartas desenhadas à mão: hover, elevação de seleção, distribuição,
+ * virada e partículas. {@link CardActor} e {@link PowerCardActor} só implementam o desenho.
+ */
+public abstract class HandCardActor extends Actor {
+
+    /** Callback de hover compartilhado pelo tooltip global. */
+    public interface HoverListener {
+        void onHoverEnter(HandCardActor actor);
+
+        void onHoverExit(HandCardActor actor);
+    }
+
+    protected final GameAssets assets;
+    protected final boolean faceDown;
+    protected final Particles sparkles;
+
+    protected boolean selected;
+    protected boolean interactive;
+    protected boolean hoverable;
+    protected boolean disabled;
+    protected boolean hovered;
+    protected float hoverLocalX;
+    protected float lift;
+    protected float appear = 0.25f;
+    protected float glowPulse;
+    protected float reveal = 1f;
+    protected float revealDelay;
+    protected float revealSpeed = 3f;
+    protected boolean revealing;
+    protected boolean dealMotion = true;
+    protected boolean sparkled = true;
+
+    private HoverListener hoverListener;
+
+    protected HandCardActor(GameAssets assets, boolean faceDown, Runnable onClick) {
+        this.assets = assets;
+        this.faceDown = faceDown;
+        this.interactive = onClick != null;
+        this.sparkles = new Particles(assets, true);
+        setTouchable(this.interactive ? Touchable.enabled : Touchable.disabled);
+        addListener(new ClickListener() {
+            @Override
+            public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
+                if (isHoverable()) {
+                    hovered = true;
+                    hoverLocalX = x;
+                    if (hoverListener != null) {
+                        hoverListener.onHoverEnter(HandCardActor.this);
+                    }
+                }
+            }
+
+            @Override
+            public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
+                boolean wasHovered = hovered;
+                hovered = false;
+                if (wasHovered && hoverListener != null) {
+                    hoverListener.onHoverExit(HandCardActor.this);
+                }
+            }
+
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                if (isClickable() && onClick != null) {
+                    onClick.run();
+                }
+            }
+        });
+    }
+
+    private boolean isClickable() {
+        return interactive && !disabled;
+    }
+
+    protected boolean isHoverable() {
+        return (interactive || hoverable) && !disabled;
+    }
+
+    public void setHoverable(boolean hoverable) {
+        this.hoverable = hoverable;
+        updateTouchable();
+    }
+
+    public void setHoverListener(HoverListener hoverListener) {
+        this.hoverListener = hoverListener;
+    }
+
+    /** QA/DevPreview: injeta hover determinístico sem depender de eventos do mouse. */
+    public void demoHover(float localX, float localY) {
+        if (!isHoverable()) {
+            hoverable = true;
+            updateTouchable();
+        }
+        hovered = true;
+        hoverLocalX = localX;
+        if (hoverListener != null) {
+            hoverListener.onHoverEnter(this);
+        }
+    }
+
+    public void demoUnhover() {
+        boolean wasHovered = hovered;
+        hovered = false;
+        if (wasHovered && hoverListener != null) {
+            hoverListener.onHoverExit(this);
+        }
+    }
+
+    private void updateTouchable() {
+        setTouchable((interactive || hoverable) ? Touchable.enabled : Touchable.disabled);
+    }
+
+    public void setSelected(boolean selected) {
+        boolean becameSelected = selected && !this.selected;
+        this.selected = selected;
+        if (becameSelected && getWidth() > 0f) {
+            sparkles.sparkles(getX() + getWidth() / 2f, getY() + getHeight() * 0.58f,
+                    getWidth() * 0.55f, 9);
+        }
+    }
+
+    public void setInteractive(boolean interactive) {
+        this.interactive = interactive;
+        updateTouchable();
+    }
+
+    /** Inicia a revelação da carta (verso → frente), com atraso e duração em segundos. */
+    public void startDeal(float delay, float duration) {
+        reveal = 0f;
+        revealDelay = Math.max(0f, delay);
+        revealSpeed = 1f / Math.max(0.08f, duration);
+        revealing = true;
+        sparkled = false;
+        dealMotion = true;
+    }
+
+    /** Vira a carta na mesa (só o giro vertical, sem salto nem queda). */
+    public void startFlip(float delay, float duration) {
+        reveal = 0f;
+        revealDelay = Math.max(0f, delay);
+        revealSpeed = 1f / Math.max(0.08f, duration);
+        revealing = true;
+        sparkled = false;
+        dealMotion = false;
+    }
+
+    /** Mostra a carta sem animação de distribuição. */
+    public void showInstantly() {
+        reveal = 1f;
+        revealDelay = 0f;
+        revealing = false;
+        dealMotion = false;
+        sparkled = true;
+    }
+
+    @Override
+    public void act(float delta) {
+        super.act(delta);
+        float targetLift = selected ? 16f : (hovered && isHoverable() ? 7f : 0f);
+        lift = MathUtils.lerp(lift, targetLift, Math.min(1f, delta * 14f));
+        appear = MathUtils.lerp(appear, 1f, Math.min(1f, delta * 7f));
+        glowPulse += delta;
+
+        if (revealing) {
+            if (revealDelay > 0f) {
+                revealDelay -= delta;
+            } else {
+                reveal = Math.min(1f, reveal + delta * revealSpeed);
+                if (reveal >= 1f) {
+                    revealing = false;
+                }
+            }
+            if (!sparkled && reveal >= 0.55f && getWidth() > 0f) {
+                sparkled = true;
+                int count = MathUtils.clamp((int) (getWidth() / 11f), 5, 12);
+                sparkles.sparkles(getX() + getWidth() / 2f, getY() + getHeight() * 0.55f,
+                        getWidth() * 0.5f, count);
+            }
+        }
+        sparkles.update(delta);
+    }
+}

@@ -11,7 +11,6 @@ import com.game.net.protocol.DamagePayload;
 import com.game.net.protocol.Envelope;
 import com.game.net.protocol.ErrorPayload;
 import com.game.net.protocol.GameOverPayload;
-import com.game.net.protocol.ActionType;
 import com.game.net.protocol.MessageCodec;
 import com.game.net.protocol.MessageType;
 import com.game.net.protocol.PlayerStatusPayload;
@@ -246,27 +245,7 @@ public final class GameSession {
                 }
                 engine.submitPlay(playerId, cards);
             }
-            case USE_SABOTAGE -> {
-                if (action.offerIndex() == null) {
-                    throw new GameRuleException("INVALID_SABOTAGE", "Índice de sabotagem ausente");
-                }
-                engine.useSabotage(playerId, action.offerIndex());
-            }
-            case PASS_SABOTAGE -> engine.passSabotage(playerId);
-            case PICK_JOKER -> {
-                if (action.offerIndex() == null) {
-                    throw new GameRuleException("INVALID_OFFER", "Índice de oferta ausente");
-                }
-                engine.pickJoker(playerId, action.offerIndex());
-            }
-            case REROLL -> engine.reroll(playerId);
-            case BUY_SABOTAGE -> {
-                if (action.offerIndex() == null) {
-                    throw new GameRuleException("INVALID_SABOTAGE", "Índice de sabotagem ausente");
-                }
-                engine.buySabotage(playerId, action.offerIndex());
-            }
-            case READY -> engine.ready(playerId);
+            case LOCK_POWERS -> engine.lockPowers(playerId, action.powerIndices());
             case ADVANCE -> engine.advance(playerId);
             case REMATCH -> engine.requestRematch(playerId);
         }

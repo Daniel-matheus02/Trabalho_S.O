@@ -1,6 +1,5 @@
 package com.game.client.network;
 
-import com.game.core.rules.RoundOutcome;
 import com.game.core.state.GameSnapshot;
 import com.game.net.protocol.DamagePayload;
 import com.game.net.protocol.GameOverPayload;
@@ -55,8 +54,5 @@ public sealed interface ClientEvent {
     }
 
     record ErrorReceived(String code, String message) implements ClientEvent {
-    }
-
-    record RematchWaiting() implements ClientEvent {
     }
 }

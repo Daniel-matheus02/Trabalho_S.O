@@ -14,7 +14,8 @@ import java.util.UUID;
 
 /**
  * Sessão para um jogador. Possui um motor autoritativo local além de um bot que age através
- * do mesmo motor, com atrasos semelhantes aos humanos. A renderização nunca vê as cartas ocultas do bot.
+ * do mesmo motor, com atrasos semelhantes aos humanos. A renderização nunca vê as cartas ou os
+ * poderes ocultos do bot.
  */
 public final class LocalMatchSession implements MatchSession {
 
@@ -22,12 +23,10 @@ public final class LocalMatchSession implements MatchSession {
     private static final float REVEAL_TIME = 1.1f;
 
     private final GameEngine engine;
-    private final BotBrain bot = new BotBrain(new ScoringEngine(), 2);
+    private final BotBrain bot;
 
     private float timer;
     private String signature = "";
-    private String shopVisit = "";
-    private boolean botRerolledThisShop;
 
     public LocalMatchSession(String playerName) {
         this(playerName, GameRules.DEFAULT, new java.util.Random());
@@ -37,6 +36,7 @@ public final class LocalMatchSession implements MatchSession {
         this.engine = new GameEngine(UUID.randomUUID().toString(),
                 playerName == null || playerName.isBlank() ? "Jogador" : playerName, "CPU",
                 random, rules, new ScoringEngine());
+        this.bot = new BotBrain(new ScoringEngine(), rules.maxPlay());
         this.engine.start();
     }
 
@@ -61,33 +61,13 @@ public final class LocalMatchSession implements MatchSession {
     }
 
     @Override
-    public void useSabotage(int handIndex) {
-        engine.useSabotage(GameEngine.PLAYER_ONE, handIndex);
+    public void lockPowers(List<Integer> powerIndices) {
+        engine.lockPowers(GameEngine.PLAYER_ONE, powerIndices);
     }
 
-    @Override
-    public void passSabotage() {
-        engine.passSabotage(GameEngine.PLAYER_ONE);
-    }
-
-    @Override
-    public void pickJoker(int offerIndex) {
-        engine.pickJoker(GameEngine.PLAYER_ONE, offerIndex);
-    }
-
-    @Override
-    public void reroll() {
-        engine.reroll(GameEngine.PLAYER_ONE);
-    }
-
-    @Override
-    public void buySabotage(int offerIndex) {
-        engine.buySabotage(GameEngine.PLAYER_ONE, offerIndex);
-    }
-
-    @Override
-    public void ready() {
-        engine.ready(GameEngine.PLAYER_ONE);
+    /** DevPreview: redistribui a mão de poderes do humano sem travar a escolha. */
+    public void redealPowers() {
+        engine.redealPowersForPreview(GameEngine.PLAYER_ONE);
     }
 
     @Override
@@ -105,22 +85,15 @@ public final class LocalMatchSession implements MatchSession {
 
     @Override
     public void tick(float delta) {
-        // O bot precisa usar sua própria visão filtrada: o instantâneo do humano oculta as ofertas da CPU.
+        // O bot precisa usar sua própria visão filtrada: o instantâneo do humano oculta os poderes da CPU.
         GameSnapshot state = engine.snapshotFor(GameEngine.PLAYER_TWO);
         PlayerView cpu = state.player(GameEngine.PLAYER_TWO);
         String currentSignature = state.phase() + ":" + state.round() + ":"
-                + state.currentPlayer() + ":" + cpu.sabotageChosen() + ":"
-                + cpu.sabotageCount() + ":" + cpu.jokerPicked() + ":" + cpu.shopReady();
+                + state.currentPlayer() + ":" + cpu.powersLocked() + ":"
+                + cpu.powerCount();
         if (!currentSignature.equals(signature)) {
             signature = currentSignature;
             timer = state.phase() == GamePhase.REVEAL ? REVEAL_TIME : THINK_TIME;
-            if (state.phase() == GamePhase.SHOP) {
-                String visit = state.round() + ":" + cpu.offers().hashCode();
-                if (!visit.equals(shopVisit)) {
-                    shopVisit = visit;
-                    botRerolledThisShop = false;
-                }
-            }
         }
 
         switch (state.phase()) {
@@ -129,19 +102,17 @@ public final class LocalMatchSession implements MatchSession {
                     timer -= delta;
                     if (timer <= 0) {
                         List<Card> hand = engine.handOf(GameEngine.PLAYER_TWO);
-                        List<Card> play = bot.choosePlay(hand,
-                                engine.jokersOf(GameEngine.PLAYER_TWO),
-                                state.globalModifierId(), state.community());
-                        engine.submitPlay(GameEngine.PLAYER_TWO, play);
+                        engine.submitPlay(GameEngine.PLAYER_TWO,
+                                bot.choosePlay(hand, state.globalModifierId()));
                     }
                 }
             }
             case SABOTAGE -> {
-                if (!cpu.sabotageChosen()) {
+                if (!cpu.powersLocked()) {
                     timer -= delta;
                     if (timer <= 0) {
-                        List<String> hand = engine.sabotageHandOf(GameEngine.PLAYER_TWO);
-                        engine.useSabotage(GameEngine.PLAYER_TWO, bot.chooseSabotage(hand));
+                        List<Integer> powers = bot.choosePowers(state, GameEngine.PLAYER_TWO);
+                        engine.lockPowers(GameEngine.PLAYER_TWO, powers);
                     }
                 }
             }
@@ -153,44 +124,9 @@ public final class LocalMatchSession implements MatchSession {
                     }
                 }
             }
-            case SHOP -> tickShop(state, cpu, delta);
             default -> {
                 // Nada para o bot fazer.
             }
-        }
-    }
-
-    private void tickShop(GameSnapshot state, PlayerView cpu, float delta) {
-        timer -= delta;
-        if (timer > 0) {
-            return;
-        }
-        if (!cpu.jokerPicked()) {
-            List<Card> hand = engine.handOf(GameEngine.PLAYER_TWO);
-            List<String> jokers = engine.jokersOf(GameEngine.PLAYER_TWO);
-            List<String> offers = cpu.offers();
-            if (!botRerolledThisShop
-                    && bot.shouldReroll(offers, hand, jokers, state.globalModifierId(),
-                    cpu.rerolls(), state.community())) {
-                botRerolledThisShop = true;
-                engine.reroll(GameEngine.PLAYER_TWO);
-                return;
-            }
-            int index = bot.chooseJoker(offers, hand, jokers, state.globalModifierId(),
-                    state.community());
-            if (index >= 0) {
-                engine.pickJoker(GameEngine.PLAYER_TWO, index);
-            }
-            return;
-        }
-        if (bot.shouldBuySabotage(cpu.coins(), state.rules().sabotagePrice(),
-                cpu.sabotageCount(), state.rules().maxSabotages())
-                && !cpu.sabotageOffers().isEmpty()) {
-            engine.buySabotage(GameEngine.PLAYER_TWO, 0);
-            return;
-        }
-        if (!cpu.shopReady()) {
-            engine.ready(GameEngine.PLAYER_TWO);
         }
     }
 
@@ -200,11 +136,9 @@ public final class LocalMatchSession implements MatchSession {
         if (state.phase() == GamePhase.BUILD && state.currentPlayer() == GameEngine.PLAYER_TWO) {
             return "CPU pensando...";
         }
-        if (state.phase() == GamePhase.SABOTAGE && !state.player(GameEngine.PLAYER_TWO).sabotageChosen()) {
-            return "CPU escolhendo uma sabotagem...";
-        }
-        if (state.phase() == GamePhase.SHOP && !state.player(GameEngine.PLAYER_TWO).shopReady()) {
-            return "CPU comprando na loja...";
+        if (state.phase() == GamePhase.SABOTAGE
+                && !state.player(GameEngine.PLAYER_TWO).powersLocked()) {
+            return "CPU escolhendo poderes...";
         }
         return "";
     }

@@ -41,19 +41,14 @@ public final class CardHand extends WidgetGroup {
             applySelection();
             return;
         }
-        boolean sameCount = next.size() == cards.size();
+        boolean animate = animateDeals && cards.isEmpty();
         cards = next;
         this.interactive = interactive;
-        if (!sameCount || actors.size() != cards.size()) {
-            rebuild();
-        } else {
-            // Mesmo número de cartas, mas faces diferentes: reconstrói sem repetir a animação de distribuição.
-            rebuild();
-        }
+        rebuild(animate);
         applySelection();
     }
 
-    private void rebuild() {
+    private void rebuild(boolean animateCards) {
         clearChildren();
         actors.clear();
         for (int i = 0; i < cards.size(); i++) {
@@ -66,7 +61,7 @@ public final class CardHand extends WidgetGroup {
                     });
             actor.setInteractive(interactive);
             actor.getColor().a = 1f;
-            if (animateDeals) {
+            if (animateCards) {
                 actor.startDeal(index * 0.055f, 0.34f);
             } else {
                 actor.showInstantly();
@@ -93,14 +88,25 @@ public final class CardHand extends WidgetGroup {
         }
     }
 
-    public void setDisabled(boolean disabled) {
-        for (CardActor actor : actors) {
-            actor.setDisabled(disabled);
+    /**
+     * Remove da mão os atores dos índices pedidos e devolve-os para que a mesa os adote. A lista
+     * {@link #cards} só é atualizada no próximo {@link #setCards}, que reconstrói as restantes.
+     */
+    public java.util.List<CardActor> takeActors(java.util.List<Integer> indices) {
+        java.util.List<CardActor> taken = new ArrayList<>();
+        for (int index : indices) {
+            if (index >= 0 && index < actors.size()) {
+                taken.add(actors.get(index));
+            }
         }
+        // Os atores continuam presos à mão até a mesa reparentá-los; assim a conversão de
+        // coordenadas para o palco continua válida.
+        actors.removeAll(taken);
+        return taken;
     }
 
-    public int cardCount() {
-        return cards.size();
+    public java.util.List<CardActor> actorsSnapshot() {
+        return java.util.List.copyOf(actors);
     }
 
     private void applySelection() {
@@ -111,22 +117,6 @@ public final class CardHand extends WidgetGroup {
 
     @Override
     public void layout() {
-        int count = actors.size();
-        if (count == 0) {
-            return;
-        }
-        float gap = Math.max(4f, Math.min(10f, getWidth() * 0.012f));
-        float maxHeight = Math.max(80f, getHeight() - 22f);
-        float cardWidth = maxHeight / 1.38f;
-        cardWidth = Math.min(cardWidth, 112f);
-        cardWidth = Math.min(cardWidth, (getWidth() - gap * (count - 1)) / count);
-        cardWidth = Math.max(48f, cardWidth);
-        float cardHeight = cardWidth * 1.38f;
-        float total = count * cardWidth + gap * (count - 1);
-        float startX = (getWidth() - total) / 2f;
-        float y = (getHeight() - cardHeight) / 2f - 2f;
-        for (int i = 0; i < count; i++) {
-            actors.get(i).setBounds(startX + i * (cardWidth + gap), y, cardWidth, cardHeight);
-        }
+        CardRowLayout.layout(this, actors);
     }
 }

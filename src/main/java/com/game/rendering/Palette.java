@@ -6,11 +6,8 @@ import com.badlogic.gdx.graphics.Color;
 public final class Palette {
 
     public static final Color FELT_DARK = rgb(0x0d2d21);
-    public static final Color FELT = rgb(0x123a2b);
-    public static final Color FELT_LIGHT = rgb(0x1a4d38);
     public static final Color LINE = rgb(0x1f5240);
     public static final Color PANEL = rgba(0x0b241b, 0.92f);
-    public static final Color PANEL_LIGHT = rgba(0x0e2a20, 0.95f);
     public static final Color CARD = rgb(0xf3ecdb);
     public static final Color CARD_EDGE = rgb(0xd8cdb2);
     public static final Color INK = rgb(0xeae6d8);
@@ -28,8 +25,6 @@ public final class Palette {
     public static final Color DIAMOND = rgb(0x2f6fc8);
     public static final Color CLUB = rgb(0x2f9152);
     public static final Color WHITE = rgb(0xffffff);
-    public static final Color BLACK = rgb(0x000000);
-    public static final Color SHADOW = rgba(0x000000, 0.45f);
 
     private Palette() {
     }

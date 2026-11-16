@@ -7,36 +7,54 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Todos os curingas individuais do jogo de referência, com seus efeitos exatos. */
+/** Os nove curingas do jogo, com seus efeitos exatos sobre as cinco cartas jogadas. */
 public final class Jokers {
 
     private static final Map<String, JokerDef> BY_ID = new LinkedHashMap<>();
 
     static {
-        register("naipe_afiado", "Espada Afiada", "+20 fichas por \u2660 jogada", context -> {
+        register("naipe_afiado", "Briga de Espada", "+15 fichas por carta de espadas jogada", context -> {
             int spades = context.countSuit(Suit.SPADES);
             if (spades > 0) {
                 int value = 15 * spades;
                 context.addChips(value);
-                context.addPlusLine("Espada Afiada: +" + value + " fichas");
+                context.addPlusLine("Briga de Espada: +" + value + " fichas");
             }
         });
-        register("combo5", "Combo Qu\u00edntuplo", "mult \u00d72 ao jogar 5 cartas", context -> {
-            if (context.cardCount() == 5) {
-                context.multiplyMult(2);
-                context.addMultLine("Combo Qu\u00edntuplo: mult x2");
+        register("ouro_ardente", "Chuva de Ouro", "+15 fichas por carta de ouros jogada", context -> {
+            int diamonds = context.countSuit(Suit.DIAMONDS);
+            if (diamonds > 0) {
+                int value = 15 * diamonds;
+                context.addChips(value);
+                context.addPlusLine("Chuva de Ouro: +" + value + " fichas");
             }
         });
-        register("mao_cheia", "M\u00e3o Cheia", "+50 fichas com par ou melhor", context -> {
-            if (context.typeAtLeast(HandType.PAIR)) {
+        register("coracao", "Cortem a Cabeça!", "+15 fichas por carta de copas jogada", context -> {
+            int hearts = context.countSuit(Suit.HEARTS);
+            if (hearts > 0) {
+                int value = 15 * hearts;
+                context.addChips(value);
+                context.addPlusLine("Cortem a Cabeça!: +" + value + " fichas");
+            }
+        });
+        register("pau_potente", "Pau Potente", "+15 fichas por carta de paus jogada", context -> {
+            int clubs = context.countSuit(Suit.CLUBS);
+            if (clubs > 0) {
+                int value = 15 * clubs;
+                context.addChips(value);
+                context.addPlusLine("Pau Potente: +" + value + " fichas");
+            }
+        });
+        register("escada", "Escada Alta", "+50 fichas se a mão for sequência ou melhor", context -> {
+            if (context.typeAtLeast(HandType.STRAIGHT)) {
                 context.addChips(50);
-                context.addPlusLine("M\u00e3o Cheia: +50 fichas");
+                context.addPlusLine("Escada Alta: +50 fichas");
             }
         });
-        register("rio", "Rio de Fichas", "+30 fichas se for flush", context -> {
-            if (context.type().isFlushFamily()) {
+        register("rio", "O Mar Está Para Fichas", "+30 fichas se a mão for flush ou melhor", context -> {
+            if (context.typeAtLeast(HandType.FLUSH)) {
                 context.addChips(30);
-                context.addPlusLine("Rio de Fichas: +30 fichas");
+                context.addPlusLine("O Mar Está Para Fichas: +30 fichas");
             }
         });
         register("par_mult", "Par Perfeito", "+4 mult com par ou melhor", context -> {
@@ -45,46 +63,16 @@ public final class Jokers {
                 context.addMultLine("Par Perfeito: +4 mult");
             }
         });
-        register("coracao", "Cortem a cabeça!", "+20 fichas por \u2665 jogada", context -> {
-            int hearts = context.countSuit(Suit.HEARTS);
-            if (hearts > 0) {
-                int value = 15 * hearts;
-                context.addChips(value);
-                context.addPlusLine("Cortem a cabeça!: +" + value + " fichas");
-            }
-        });
-        register("ouro_ardente", "Ouro Ardente", "+20 fichas por \u2666 jogada", context -> {
-            int diamonds = context.countSuit(Suit.DIAMONDS);
-            if (diamonds > 0) {
-                int value = 15 * diamonds;
-                context.addChips(value);
-                context.addPlusLine("Ouro Ardente: +" + value + " fichas");
-            }
-        });
-        register("pau_potente", "Pau Potente", "+20 fichas por \u2663 jogada", context -> {
-            int clubs = context.countSuit(Suit.CLUBS);
-            if (clubs > 0) {
-                int value = 15 * clubs;
-                context.addChips(value);
-                context.addPlusLine("Pau Potente: +" + value + " fichas");
-            }
-        });
-        register("trinca_ouro", "Trinca de Ouro", "+60 fichas com trinca ou melhor", context -> {
+        register("trinca_ouro", "Três é Mais Gostoso", "+60 fichas com trinca ou melhor", context -> {
             if (context.typeAtLeast(HandType.THREE_OF_A_KIND)) {
                 context.addChips(60);
-                context.addPlusLine("Trinca de Ouro: +60 fichas");
+                context.addPlusLine("Três é Mais Gostoso: +60 fichas");
             }
         });
-        register("escada", "Escada Firme", "+50 fichas se sequ\u00eancia", context -> {
-            if (context.type().isStraightFamily()) {
-                context.addChips(50);
-                context.addPlusLine("Escada Firme: +50 fichas");
-            }
-        });
-        register("alto_risco", "Alto Risco", "+40 fichas ao jogar s\u00f3 1 carta", context -> {
-            if (context.cardCount() == 1) {
-                context.addChips(40);
-                context.addPlusLine("Alto Risco: +40 fichas");
+        register("quintuplus", "Quíntuplus", "+8 mult com Full House ou melhor", context -> {
+            if (context.typeAtLeast(HandType.FULL_HOUSE)) {
+                context.addMult(8);
+                context.addMultLine("Quíntuplus: +8 mult");
             }
         });
     }

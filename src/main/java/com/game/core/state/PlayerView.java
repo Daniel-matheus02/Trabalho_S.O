@@ -1,13 +1,15 @@
 package com.game.core.state;
 
 import com.game.core.model.Card;
+import com.game.core.model.PowerCard;
+import com.game.core.scoring.ScoreResult;
 
 import java.util.List;
 
 /**
- * Projeção de um jogador por visualizador. As cartas só estão presentes quando o visualizador pode vê-las;
- * caso contrário, apenas a contagem é exposta, o que faz a informação oculta
- * funcionar tanto na rede quanto contra a IA.
+ * Projeção de um jogador por visualizador. As cartas e os poderes só estão presentes quando o
+ * visualizador pode vê-los; caso contrário, apenas a contagem é exposta, o que faz a informação
+ * oculta funcionar tanto na rede quanto contra a IA.
  */
 public record PlayerView(
         int id,
@@ -15,31 +17,20 @@ public record PlayerView(
         int hp,
         int maxHp,
         int handCount,
-        boolean handVisible,
         List<Card> hand,
-        List<Card> playedCards,
         boolean submitted,
-        List<String> jokers,
-        List<String> offers,
-        int rerolls,
-        int nextRerollCost,
-        int coins,
-        int lossStreak,
-        List<String> sabotageHand,
-        int sabotageCount,
-        List<String> sabotageOffers,
-        boolean sabotageChosen,
-        boolean jokerPicked,
-        boolean shopReady,
-        boolean ready,
-        boolean rematchWanted
+        List<Card> playedCards,
+        ScoreResult tableScore,
+        List<PowerCard> powerHand,
+        int powerCount,
+        List<PowerCard> playedPowers,
+        boolean powersLocked,
+        boolean ready
 ) {
     public PlayerView {
         hand = List.copyOf(hand);
         playedCards = List.copyOf(playedCards);
-        jokers = List.copyOf(jokers);
-        offers = List.copyOf(offers);
-        sabotageHand = List.copyOf(sabotageHand);
-        sabotageOffers = List.copyOf(sabotageOffers);
+        powerHand = List.copyOf(powerHand);
+        playedPowers = List.copyOf(playedPowers);
     }
 }

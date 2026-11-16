@@ -5,7 +5,6 @@ import com.game.client.network.GameClient;
 import com.game.core.model.Card;
 import com.game.core.state.GamePhase;
 import com.game.core.state.GameSnapshot;
-import com.game.core.state.PlayerView;
 import com.game.net.protocol.ActionPayload;
 import com.game.net.protocol.SessionInfoPayload;
 import com.game.server.ServerConfig;
@@ -28,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Teste de ponta a ponta sobre sockets TCP reais: dois clientes, um servidor autoritativo, uma
- * rodada completa com draft e segunda rodada, além da validação de comandos fora do turno.
+ * rodada completa com poderes e segunda rodada, além da validação de comandos fora do turno.
  */
 class ServerIntegrationTest {
 
@@ -53,7 +52,7 @@ class ServerIntegrationTest {
     }
 
     @Test
-    @DisplayName("dois clientes desktop jogam uma rodada, fazem o draft de um curinga e iniciam a segunda rodada")
+    @DisplayName("dois clientes desktop jogam uma rodada, travam os poderes e iniciam a segunda rodada")
     void fullNetworkRound() throws Exception {
         GameClient ana = newClient();
         SessionInfoPayload info = ana.createSession("Ana").get(5, TimeUnit.SECONDS);
@@ -84,31 +83,50 @@ class ServerIntegrationTest {
         ClientEvent.ErrorReceived error = awaitError(beto, "NOT_YOUR_TURN", 5_000);
         assertEquals("NOT_YOUR_TURN", error.code());
 
-        // O jogador 1 envia duas cartas.
-        List<String> play1 = anaState.player(1).hand().subList(0, 2).stream()
+        // O jogador 1 envia cinco cartas; só ele vê a própria jogada na mesa.
+        List<String> play1 = anaState.player(1).hand().subList(0, 5).stream()
                 .map(Card::code).toList();
         ana.sendAction(ActionPayload.play(play1));
-        await(ana, s -> s.currentPlayer() == 2 && s.phase() == GamePhase.BUILD, 5_000);
-        await(beto, s -> s.currentPlayer() == 2 && s.phase() == GamePhase.BUILD, 5_000);
+        GameSnapshot afterPlay1 = await(ana, s -> s.currentPlayer() == 2
+                && s.phase() == GamePhase.BUILD, 5_000);
+        assertEquals(5, afterPlay1.player(1).playedCards().size());
+        assertTrue(afterPlay1.player(2).playedCards().isEmpty());
+        GameSnapshot betoView = await(beto, s -> s.currentPlayer() == 2
+                && s.phase() == GamePhase.BUILD, 5_000);
+        assertTrue(betoView.player(1).playedCards().isEmpty(),
+                "a jogada do primeiro não vaza para o oponente antes da segunda");
 
-        // O jogador 2 envia duas cartas; as cinco cartas da mesa são abertas.
+        // O jogador 2 envia cinco cartas; a mesa aparece e cada lado recebe sua mão de poderes.
         GameSnapshot betoTurn = beto.latestSnapshot();
-        List<String> play2 = betoTurn.player(2).hand().subList(0, 2).stream()
+        List<String> play2 = betoTurn.player(2).hand().subList(0, 5).stream()
                 .map(Card::code).toList();
         beto.sendAction(ActionPayload.play(play2));
 
-        GameSnapshot anaSabotage = await(ana, s -> s.phase() == GamePhase.SABOTAGE, 5_000);
-        assertEquals(5, anaSabotage.community().size());
-        assertEquals(1, anaSabotage.firstResolver());
-        ana.sendAction(ActionPayload.passSabotage());
-        beto.sendAction(ActionPayload.passSabotage());
+        GameSnapshot anaPowers = await(ana, s -> s.phase() == GamePhase.SABOTAGE, 5_000);
+        GameSnapshot betoPowers = await(beto, s -> s.phase() == GamePhase.SABOTAGE, 5_000);
+        assertEquals(6, anaPowers.player(1).powerHand().size());
+        assertTrue(anaPowers.player(2).powerHand().isEmpty(),
+                "os poderes do oponente continuam ocultos");
+        assertEquals(6, anaPowers.player(2).powerCount());
+        assertEquals(6, betoPowers.player(2).powerHand().size());
+        assertTrue(betoPowers.player(1).powerHand().isEmpty());
+
+        ana.sendAction(ActionPayload.lockPowers(List.of(0, 1)));
+        beto.sendAction(ActionPayload.lockPowers(List.of()));
 
         GameSnapshot anaReveal = await(ana, s -> s.phase() == GamePhase.REVEAL, 5_000);
         GameSnapshot betoReveal = await(beto, s -> s.phase() == GamePhase.REVEAL, 5_000);
         assertNotNull(anaReveal.lastOutcome());
-        assertEquals(2, anaReveal.lastOutcome().player1Cards().size());
-        assertEquals(2, anaReveal.lastOutcome().player2Cards().size());
-        assertEquals(5, anaReveal.lastOutcome().community().size());
+        assertEquals(5, anaReveal.lastOutcome().player1Cards().size());
+        assertEquals(5, anaReveal.lastOutcome().player2Cards().size());
+        assertEquals(5, anaReveal.player(1).playedCards().size());
+        assertEquals(5, anaReveal.player(2).playedCards().size());
+        assertEquals(anaReveal.player(1).playedCards(), betoReveal.player(1).playedCards(),
+                "as duas mãos ficam visíveis para os dois jogadores");
+        assertEquals(2, anaReveal.lastOutcome().player1Powers().size());
+        assertTrue(anaReveal.lastOutcome().player2Powers().isEmpty());
+        assertEquals(2, anaReveal.player(1).playedPowers().size());
+        assertTrue(anaReveal.player(2).playedPowers().isEmpty());
         assertEquals(anaReveal.lastOutcome().player1Score(), betoReveal.lastOutcome().player1Score());
 
         int expectedWinner = anaReveal.lastOutcome().winner();
@@ -120,28 +138,18 @@ class ServerIntegrationTest {
             assertEquals(300 - damage, anaReveal.player(1).hp());
         }
 
-        // Ambos confirmam a revelação e depois vão para a loja.
+        // Ambos confirmam a revelação e vão direto à próxima rodada.
         ana.sendAction(ActionPayload.advance());
         beto.sendAction(ActionPayload.advance());
-
-        GameSnapshot anaShop = await(ana, s -> s.phase() == GamePhase.SHOP, 5_000);
-        GameSnapshot betoShop = await(beto, s -> s.phase() == GamePhase.SHOP, 5_000);
-        assertEquals(3, anaShop.player(1).offers().size());
-        assertEquals(3, anaShop.player(1).sabotageOffers().size());
-        assertEquals(anaShop.player(1).offers(), betoShop.player(2).offers());
-
-        ana.sendAction(ActionPayload.pickJoker(0));
-        ana.sendAction(ActionPayload.ready());
-        beto.sendAction(ActionPayload.pickJoker(1));
-        beto.sendAction(ActionPayload.ready());
 
         GameSnapshot roundTwo = await(ana, s -> s.phase() == GamePhase.BUILD && s.round() == 2, 5_000);
         assertEquals(2, roundTwo.round());
         assertEquals(1, roundTwo.currentPlayer());
-        assertEquals(1, roundTwo.player(1).jokers().size());
-        assertEquals(1, roundTwo.player(2).jokers().size());
         assertEquals(8, roundTwo.player(1).hand().size());
         assertEquals(2, roundTwo.firstResolver());
+        assertEquals(0, roundTwo.player(1).powerCount());
+        assertTrue(roundTwo.player(1).playedPowers().isEmpty());
+        assertFalse(roundTwo.player(1).powersLocked());
 
         assertTrue(server.sessions().activeSessions() >= 1);
     }
@@ -170,7 +178,7 @@ class ServerIntegrationTest {
         assertTrue(recovered.player(2).hand().isEmpty());
 
         // O oponente continua jogando contra o mesmo estado autoritativo.
-        List<String> cards = recovered.player(1).hand().subList(0, 2).stream().map(Card::code).toList();
+        List<String> cards = recovered.player(1).hand().subList(0, 5).stream().map(Card::code).toList();
         reconnected.sendAction(ActionPayload.play(cards));
         await(beto, s -> s.currentPlayer() == 2 && s.phase() == GamePhase.BUILD, 5_000);
     }

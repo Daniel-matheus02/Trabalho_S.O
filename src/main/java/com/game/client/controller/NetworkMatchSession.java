@@ -49,33 +49,8 @@ public final class NetworkMatchSession implements MatchSession {
     }
 
     @Override
-    public void useSabotage(int handIndex) {
-        client.sendAction(ActionPayload.useSabotage(handIndex));
-    }
-
-    @Override
-    public void passSabotage() {
-        client.sendAction(ActionPayload.passSabotage());
-    }
-
-    @Override
-    public void pickJoker(int offerIndex) {
-        client.sendAction(ActionPayload.pickJoker(offerIndex));
-    }
-
-    @Override
-    public void reroll() {
-        client.sendAction(ActionPayload.reroll());
-    }
-
-    @Override
-    public void buySabotage(int offerIndex) {
-        client.sendAction(ActionPayload.buySabotage(offerIndex));
-    }
-
-    @Override
-    public void ready() {
-        client.sendAction(ActionPayload.ready());
+    public void lockPowers(List<Integer> powerIndices) {
+        client.sendAction(ActionPayload.lockPowers(powerIndices));
     }
 
     @Override

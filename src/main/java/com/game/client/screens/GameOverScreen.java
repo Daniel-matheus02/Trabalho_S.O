@@ -1,11 +1,9 @@
 package com.game.client.screens;
 
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.game.client.controller.MatchSession;
 import com.game.client.network.ClientEvent;
-import com.game.core.scoring.Jokers;
 import com.game.core.state.GamePhase;
 import com.game.core.state.GameSnapshot;
 import com.game.core.state.PlayerView;
@@ -13,7 +11,6 @@ import com.game.launcher.DuelGame;
 import com.game.rendering.Palette;
 import com.game.rendering.Ui;
 
-import java.util.List;
 
 /** Vencedor, estatísticas finais, revanche e retorno ao menu principal. */
 public final class GameOverScreen extends BaseScreen {
@@ -105,15 +102,6 @@ public final class GameOverScreen extends BaseScreen {
         hpRow.add(hpBar(view)).width(300).height(12).padTop(6).padBottom(8);
         panel.add(hpRow).left().row();
 
-        panel.add(Ui.label(skin, "JOKERS", "gold-small")).left().padTop(4).row();
-        if (view.jokers().isEmpty()) {
-            panel.add(Ui.label(skin, "NENHUM JOKER ADQUIRIDO", "small")).left().row();
-        } else {
-            for (String id : view.jokers()) {
-                panel.add(Ui.label(skin, "\u2605 " + Jokers.nameOf(id) + " \u2014 "
-                        + Jokers.descriptionOf(id), "small")).left().row();
-            }
-        }
         panel.add(Ui.label(skin, "JOGADAS ENVIADAS: " + (view.submitted() ? "SIM" : "\u2014"),
                 "small")).left().padTop(6).row();
         return panel;
